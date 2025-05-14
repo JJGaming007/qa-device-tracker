@@ -251,8 +251,8 @@
 
 
 
-    <form method="post" class="dropdown-form">
-        <input type="text" name="search" placeholder="Search by device name or serial number" value="{{ request.args.get('search', '') }}">
+    <form method="get" class="dropdown-form">
+        <input type="text" id="searchBox" name="search" placeholder="Search by device name or serial number" value="{{ request.args.get('search', '') }}">
         <button type="submit" class="button">Search</button>
     </form>
 
@@ -336,6 +336,21 @@
         localStorage.setItem('scrollPos', window.scrollY);
     });
 </script>
+
+<script>
+    const searchBox = document.getElementById('searchBox');
+    const searchForm = searchBox.closest('form');
+
+    searchBox.addEventListener('input', function () {
+        if (this.value.trim() === '') {
+            // Remove search parameter from URL
+            const url = new URL(window.location);
+            url.searchParams.delete('search');
+            window.location.href = url.toString(); // reloads and resets device list
+        }
+    });
+</script>
+
 
 </body>
 </html>
