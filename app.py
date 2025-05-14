@@ -19,6 +19,10 @@ login_manager = LoginManager()
 login_manager.login_view = 'login'
 login_manager.init_app(app)
 
+@login_manager.unauthorized_handler
+def unauthorized_callback():
+    return redirect(url_for('login', next=request.endpoint))
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
