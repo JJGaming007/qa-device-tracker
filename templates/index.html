@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>QA Device Tracker</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #f0f2f5;
+            margin: 0;
+            padding: 40px;
+            color: #333;
+            transition: background 0.3s, color 0.3s;
+        }
+
+        body.dark {
+            background: #121212;
+            color: #eee;
+        }
+
+        h1 {
+            color: #222;
+            margin: 0;
+        }
+
+        body.dark h1 {
+            color: #fff;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .logo {
+            height: 50px;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0;
+            right: 0; bottom: 0;
+            background-color: #ccc;
+            transition: 0.4s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 4px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #007bff;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
+        form {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            padding: 10px;
+            width: 300px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            margin-right: 10px;
+            font-size: 16px;
+        }
+
+        body.dark input[type="text"] {
+            background-color: #2b2b2b;
+            color: #fff;
+            border-color: #444;
+        }
+
+        .button {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+            font-weight: 600;
+        }
+
+        .button:hover {
+            background: #0056b3;
+        }
+
+        .button.return {
+            background: #28a745;
+        }
+
+        .button.return:hover {
+            background: #1e7e34;
+        }
+
+        .button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        table {
+            width: 100%;
+            max-width: 1100px;
+            margin: 0 auto;
+            border-collapse: collapse;
+            background: white;
+            box-shadow: 0 0 12px rgba(0, 0, 0, 0.05);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        body.dark table {
+            background: #1e1e1e;
+        }
+
+        th, td {
+            padding: 16px;
+            text-align: left;
+        }
+
+        th {
+            background: #333;
+            color: white;
+            text-transform: uppercase;
+            font-size: 14px;
+            letter-spacing: 1px;
+        }
+
+        tr:nth-child(even) {
+            background: #f9f9f9;
+        }
+
+        body.dark tr:nth-child(even) {
+            background-color: #2c2c2c;
+        }
+
+        tr:hover {
+            background-color: #f1f7ff;
+        }
+
+        body.dark tr:hover {
+            background-color: #2a3b55;
+        }
+
+        .form-inline {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .form-inline input {
+            flex: 1;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 20px;
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            table, form {
+                width: 100%;
+            }
+
+            form {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            input[type="text"] {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" class="logo">
+        <h1>QA Device Tracker</h1>
+        <label class="switch">
+            <input type="checkbox" id="themeToggle">
+            <span class="slider"></span>
+        </label>
+    </div>
+
+    <form method="get" action="/">
+        <input type="text" name="search" placeholder="Search by device name or serial number" value="{{ request.args.get('search', '') }}">
+        <button type="submit" class="button">Search</button>
+    </form>
+
+    {% if devices %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Sr No</th>
+                    <th>Device Name</th>
+                    <th>Serial Number</th>
+                    <th>Owner</th>
+                    <th>Status</th>
+                    <th>Assign</th>
+                    <th>Return</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for device in devices %}
+                <tr>
+                    <td>{{ device['Sr No'] }}</td>
+                    <td>{{ device['Device Name'] }}</td>
+                    <td>{{ device['Serial Number'] }}</td>
+                    <td>{{ device['Assigned To'] }}</td>
+                    <td>{{ device['Status'] }}</td>
+                    <td>
+                        <form action="/assign" method="post">
+                            <input type="hidden" name="device" value="{{ device['Device Name'] }}">
+                            <input type="text" name="user" placeholder="Your name" required>
+                            <button type="submit" class="button" {% if device['Status'] == 'In Use' %}disabled{% endif %}>
+                                Assign
+                            </button>
+                        </form>
+                    </td>
+                    <td>
+                        <form action="/return" method="post">
+                            <input type="hidden" name="device" value="{{ device['Device Name'] }}">
+                            <button type="submit" class="button return" {% if device['Status'] == 'Available' %}disabled{% endif %}>
+                                Return
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No device data found.</p>
+    {% endif %}
+
+    <script>
+        const toggle = document.getElementById('themeToggle');
+        const body = document.body;
+
+        toggle.addEventListener('change', () => {
+            body.classList.toggle('dark');
+            localStorage.setItem('theme', body.classList.contains('dark') ? 'dark' : 'light');
+        });
+
+        window.onload = () => {
+            const theme = localStorage.getItem('theme');
+            if (theme === 'dark') {
+                body.classList.add('dark');
+                toggle.checked = true;
+            }
+        };
+    </script>
+</body>
+</html>
