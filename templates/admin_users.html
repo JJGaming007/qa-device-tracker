@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Manage Users - Admin Panel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .login-container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        h2 {
+            text-align: center;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+            margin-top: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+    	padding: 12px 10px;
+    	border: 1px solid #ccc;
+    	text-align: center;
+    	vertical-align: middle;
+    	height: 100%;
+	}
+
+        .form-inline {
+    	display: flex;
+    	flex-direction: column;
+    	align-items: center;
+    	gap: 8px;
+	}
+
+
+	.form-inline select {
+    	margin-right: 0;
+    	min-width: 120px;
+	}
+
+	.form-inline .button {
+    	padding: 7px 14px;
+    	white-space: nowrap;
+	}
+
+        select {
+            padding: 6px 10px;
+            font-size: 14px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+
+        .button {
+    	padding: 6px 10px;
+    	background-color: #007bff;
+    	color: white;
+    	border: none;
+    	border-radius: 5px;
+    	cursor: pointer;
+    	font-size: 14px;
+    	height: 30px;
+	}
+
+	.button-small {
+    	padding: 6px 14px;
+    	font-size: 13px;
+    	border-radius: 4px;
+    	height: 30px;
+	}
+
+
+        .button:hover {
+            background-color: #0056b3;
+        }
+
+        .locked-text {
+            color: #999;
+            font-style: italic;
+        }
+
+        .flash.success {
+            background-color: #d4edda;
+            color: #155724;
+            padding: 8px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }
+
+        .flash.danger {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 8px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }
+
+        @media (max-width: 600px) {
+    .form-inline {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    	}
+
+    .form-inline select,
+    .form-inline .button {
+        width: 100%;
+    	}
+}
+
+        .back-link {
+            display: block;
+            text-align: center;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h2>User Management</h2>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="flash {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Email</th>
+                        <th>Current Role</th>
+                        <th>Change Role</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                        <tr>
+                            <td>{{ user.email }}</td>
+                            <td>{{ user.role }}</td>
+                            <td>
+                                {% if user.email == 'admin@example.com' %}
+                                    <span class="locked-text">Locked</span>
+                                {% else %}
+                                    <form action="{{ url_for('update_user_role', user_id=user.id) }}" method="post" class="form-inline" style="vertical-align: middle;">
+                                        <select name="role">
+                                            <option value="user" {% if user.role == 'user' %}selected{% endif %}>User</option>
+                                            <option value="admin" {% if user.role == 'admin' %}selected{% endif %}>Admin</option>
+                                        </select>
+                                        <button type="submit" class="button">Update</button>
+                                    </form>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="back-link">
+            <a href="{{ url_for('index') }}" class="button button-small">Back to Dashboard</a>
+        </div>
+    </div>
+</body>
+</html>

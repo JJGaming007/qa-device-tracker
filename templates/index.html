@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>QA Device Tracker</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+
     <style>
-        body {
+        body 
+
+	{
             font-family: 'Inter', sans-serif;
             background: #f0f2f5;
             margin: 0;
@@ -18,6 +20,15 @@
             color: #eee;
         }
 
+	.center-title {
+    	text-align: center;
+    	width: 100%;
+    	position: absolute;
+    	top: 10px;
+    	left: 0;
+	}
+
+
         h1 {
             color: #222;
             margin: 0;
@@ -28,11 +39,11 @@
         }
 
         .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 30px;
-        }
+    	display: flex;
+    	align-items: center;
+    	justify-content: space-between;
+    	padding: 10px 20px;
+	}
 
         .logo {
             height: 50px;
@@ -211,16 +222,36 @@
 </head>
 
 <body>
-    <div class="header">
-        <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" class="logo">
-        <h1>QA Device Tracker</h1>
-        <label class="switch">
-            <input type="checkbox" id="themeToggle">
-            <span class="slider"></span>
-        </label>
-    </div>
 
-    <form method="get" action="/">
+    <!-- Top right controls -->
+<div style="position: absolute; top: 20px; right: 20px; display: flex; align-items: center; gap: 16px;">
+
+    <!-- Theme Toggle -->
+    <label class="switch">
+        <input type="checkbox" id="themeToggle">
+        <span class="slider"></span>
+    </label>
+
+    <!-- Manage Users (if admin) -->
+    {% if current_user.is_authenticated and current_user.role == 'admin' %}
+        <a href="{{ url_for('manage_users') }}" class="button">Manage Users</a>
+    {% endif %}
+
+    <!-- Logout -->
+    <form action="{{ url_for('logout') }}" method="get" style="margin: 0;">
+        <button type="submit" class="button" style="background: #dc3545;">Logout</button>
+    </form>
+</div>
+
+<!-- Centered Logo and Title -->
+<div class="header" style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 20px;">
+    <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" class="logo" style="margin-bottom: 8px;">
+    <h1 class="page-title">QA Device Tracker</h1>
+</div>
+
+
+
+    <form method="post" class="dropdown-form">
         <input type="text" name="search" placeholder="Search by device name or serial number" value="{{ request.args.get('search', '') }}">
         <button type="submit" class="button">Search</button>
     </form>
@@ -288,5 +319,23 @@
             }
         };
     </script>
+<script>
+    // Prevent browser's default scroll restoration
+    if ('scrollRestoration' in history) {
+        history.scrollRestoration = 'manual';
+    }
+
+    // Restore scroll position immediately
+    const scrollPos = localStorage.getItem('scrollPos');
+    if (scrollPos !== null) {
+        window.scrollTo(0, parseInt(scrollPos));
+    }
+
+    // Save scroll position before unload
+    window.addEventListener('beforeunload', () => {
+        localStorage.setItem('scrollPos', window.scrollY);
+    });
+</script>
+
 </body>
 </html>

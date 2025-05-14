@@ -1,0 +1,170 @@
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f2f3f5;
+    margin: 0;
+    padding: 0;
+}
+
+.login-container {
+    max-width: 800px;
+    width: 90%;
+    margin: 40px auto;
+    padding: 30px;
+    background-color: white;
+    border-radius: 12px;
+    box-shadow: 0px 0px 12px rgba(0,0,0,0.1);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+
+h1, .page-title {
+    text-align: center;
+    margin: 0;
+    font-size: 28px;
+    font-weight: bold;
+}
+
+h2 {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background-color: #e0e2e7;
+    margin: 0;
+    padding: 0;
+}
+
+input[type="email"],
+input[type="password"],
+select {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 15px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+}
+
+.button {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.button:hover {
+    background-color: #0056b3;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+
+table, th, td {
+    border: 1px solid #ccc;
+}
+
+th, td {
+    padding: 10px;
+    text-align: center;
+}
+
+.flash.success {
+    background-color: #d4edda;
+    color: #155724;
+    padding: 8px;
+    margin-bottom: 10px;
+    border-radius: 5px;
+}
+
+.flash.danger {
+    background-color: #f8d7da;
+    color: #721c24;
+    padding: 8px;
+    margin-bottom: 10px;
+    border-radius: 5px;
+}
+
+.manage-users-btn {
+    background: #6c63ff;
+    margin-right: 10px;
+}
+
+/* Ensure dropdown and button are aligned and spaced */
+form.dropdown-form {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+}
+
+
+/* Improve dropdown appearance */
+select {
+    padding: 8px 10px;
+    font-size: 14px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    background-color: white;
+    min-width: 120px;
+}
+
+/* Ensure button aligns nicely with dropdown */
+form[method="post"] .button {
+    padding: 8px 14px;
+    font-size: 14px;
+}
+
+/* Mobile responsiveness for small screens */
+@media (max-width: 600px) {
+    form[method="post"] {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    table, th, td {
+        font-size: 14px;
+    }
+
+    .login-container p {
+    margin-top: 30px;
+    text-align: center;
+    }
+}
+
+.login-container input[type="email"],
+.login-container input[type="password"],
+.login-container .button {
+    max-width: 400px;
+    width: 100%;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.login-container p {
+    text-align: center;
+    margin-top: 20px;
+    font-size: 14px;
+}
+
+.login-container p a {
+    color: #007bff;
+    text-decoration: none;
+}
+
+.login-container p a:hover {
+    text-decoration: underline;
+}
+
+
