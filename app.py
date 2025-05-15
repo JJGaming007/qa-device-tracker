@@ -1,6 +1,9 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from models import db, User
+from flask_migrate import Migrate
+from functools import wraps
+from flask import abort
 from flask import Flask, flash, render_template, session, request, redirect, url_for
 import csv
 import os
@@ -10,10 +13,28 @@ from slack_sdk.webhook import WebhookClient
 import requests
 from werkzeug.security import generate_password_hash, check_password_hash
 
-app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
-db.init_app(app)
+app = Flask(__name__)  # ✅ Must come first
+
+# Now you can safely configure the app
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///qa_device_tracker.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db.init_app(app)  # ✅ Use init_app instead of re-instantiating db
+migrate = Migrate(app, db)
+
+from models import *
+
+def role_required(role):
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not current_user.is_authenticated or current_user.role != role:
+                flash('Access denied.', 'danger')
+                return redirect(url_for('index'))
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
 
 login_manager = LoginManager()
 login_manager.login_view = 'login'
@@ -82,15 +103,23 @@ def send_slack_message(message):
 def index():
     devices = read_devices()
     search_query = request.args.get('search', '').lower()
+
     if search_query:
         devices = [d for d in devices if search_query in d['Device Name'].lower() or search_query in d['Serial Number'].lower()]
+
+    # Sort: 'In Use' devices first
+    devices.sort(key=lambda x: 0 if x['Status'] == 'In Use' else 1)
+
     return render_template('index.html', devices=devices)
 
 @app.route('/assign', methods=['POST'])
 @login_required
+@role_required('admin')
 def assign():
     if current_user.role != 'admin':
-        return "Unauthorized", 403
+        flash('Only admins can assign devices.', 'danger')
+        return redirect(url_for('index'))
+
     devices = read_devices()
     device_name = request.form.get('device')
     user = request.form.get('user')
@@ -106,6 +135,14 @@ def assign():
 
     write_devices(devices)
     return redirect('/')
+
+@app.route('/some-protected-route')
+@login_required
+def protected():
+    if current_user.role != 'admin':
+        flash('Contact your Admin', 'danger')
+        return redirect(url_for('index'))
+    return "You have accessed a protected admin route."
 
 @app.route('/return', methods=['POST'])
 @login_required
