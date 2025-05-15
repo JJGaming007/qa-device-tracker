@@ -18,3 +18,12 @@ class User(db.Model, UserMixin):
         from werkzeug.security import check_password_hash
         return check_password_hash(self.password_hash, password)
 
+class Device(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    device_name = db.Column(db.String(100))
+    serial_number = db.Column(db.String(100))
+    status = db.Column(db.String(50))
+    assigned_to = db.Column(db.String(100))
+    updated_on = db.Column(db.DateTime)
+    location = db.Column(db.String(100))
+
