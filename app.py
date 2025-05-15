@@ -14,12 +14,11 @@ import requests
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)  # ✅ Must come first
-
-# Now you can safely configure the app
+app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///qa_device_tracker.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-db.init_app(app)  # ✅ Use init_app instead of re-instantiating db
+db.init_app(app)
 migrate = Migrate(app, db)
 
 from models import *
