@@ -1,21 +1,21 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
-from models import db, User, Device
+from models import db, User, DeviceInventory
 from flask_migrate import Migrate
 from functools import wraps
 from flask import abort
-from flask import Flask, flash, render_template, session, request, redirect, url_for
+from flask import Flask, flash, render_template, session, request, redirect, url_for, jsonify, current_app
 from dotenv import load_dotenv
 from dateutil import parser
 import csv
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from slack_sdk.webhook import WebhookClient
 import requests
 from werkzeug.security import generate_password_hash, check_password_hash
 
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
+load_dotenv()
 
 print("DATABASE_URL:", os.environ.get("DATABASE_URL"))
 
@@ -30,7 +30,9 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 migrate = Migrate(app, db)
 
-from models import *
+with app.app_context():
+    db.create_all()
+
 
 @app.cli.command("init-db")
 def init_db():
@@ -59,7 +61,7 @@ def unauthorized_callback():
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    return db.session.get(User, int(user_id))
 
 with app.app_context():
     db.create_all()
@@ -70,30 +72,27 @@ with app.app_context():
         db.session.add(admin)
         db.session.commit()
 
-    print("Device count:", Device.query.count())
+    print("Device count:", DeviceInventory.query.count())
 
 CSV_FILE = 'devices.csv'
 SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/XXXX/YYYY/ZZZZ"  # Replace with your actual webhook
 webhook = WebhookClient(SLACK_WEBHOOK_URL)
 
 def read_devices():
-    print("📥 read_devices() was called")
     devices = []
     if not os.path.exists(CSV_FILE):
         return devices
 
-    with open(CSV_FILE, mode='r', newline='', encoding='utf-8') as csvfile:
-        reader = csv.DictReader(csvfile)
+    with open(CSV_FILE, mode='r', newline='', encoding='utf-8') as file:
+        reader = csv.DictReader(file)
         for row in reader:
-            print("CSV Row Keys:", list(row.keys()))
-            device = {
+            devices.append({
                 'Sr No': row.get('Sr No', ''),
                 'Device Name': row.get('Device Name', ''),
                 'Serial Number': row.get('Serial Number', ''),
                 'Assigned To': row.get('Assigned To', ''),
-                'Status': row.get('Status', ''),
-            }
-            devices.append(device)
+                'Status': row.get('Status', '')
+            })
     return devices
 
 
@@ -123,29 +122,38 @@ def send_slack_message(message):
 @app.route('/')
 @login_required
 def index():
-    search_query = request.args.get('search', '').lower()
-    devices = Device.query.all()
+    search_query = request.args.get('search', '').strip().lower()
+
+    query = DeviceInventory.query
 
     if search_query:
-        devices = [d for d in devices if search_query in d.device_name.lower() or search_query in d.serial_number.lower()]
+        query = query.filter(
+            db.or_(
+                DeviceInventory.device_name.ilike(f'%{search_query}%'),
+                DeviceInventory.serial_number.ilike(f'%{search_query}%')
+            )
+        )
 
-    # Sort: 'In Use' devices first
-    devices.sort(key=lambda x: 0 if x.status == 'In Use' else 1)
+    devices = query.order_by(
+        db.case(
+            (DeviceInventory.status == 'In Use', 0),
+            else_=1
+        ),
+        DeviceInventory.sr_no.asc()
+    ).all()
 
     return render_template('index.html', devices=devices)
-
-    with app.app_context():
-        print("Device count:", Device.query.count())
 
 @app.cli.command('import_csv')
 def import_csv():
     import csv
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     with open('devices.csv', newline='', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
-            device = Device(
+            device = DeviceInventory(
+                sr_no=int(row['Sr No']),
                 device_name=row['Device Name'],
                 serial_number=row['Serial Number'],
                 status=row['Status'],
@@ -158,28 +166,31 @@ def import_csv():
         print("Imported devices from CSV.")
 
 
-@app.route('/assign', methods=['POST'])
+@app.route('/assign_device', methods=['POST'])
 @login_required
 @role_required('admin')
-def assign():
-    device_name = request.form.get('device')
-    user = request.form.get('user')
-    now = datetime.now()
+def assign_device():
+    sr_no = request.form.get("sr_no")
+    assigned_to = request.form.get("assigned_to", "").strip()
 
-    device = Device.query.filter_by(device_name=device_name).first()
+    if not sr_no:
+        return jsonify({"success": False, "message": "Missing sr_no"}), 400
+
+    device = DeviceInventory.query.get(sr_no)
     if not device:
-        flash('Device not found.', 'danger')
-        return redirect(url_for('index'))
+        return jsonify({"success": False, "message": "Device not found"}), 404
 
-    device.status = 'In Use'
-    device.assigned_to = user
-    device.updated_on = now
+    if not assigned_to or assigned_to.lower() in ["none", "unassigned"]:
+        device.assigned_to = ""
+        device.status = "Available"
+    else:
+        device.assigned_to = assigned_to
+        device.status = "In Use"
+
     db.session.commit()
 
-    send_slack_message(f":iphone: *{user}* is now using *{device_name}* at {now.strftime('%Y-%m-%d %H:%M:%S')}")
-    flash(f"{device_name} assigned to {user}.", "success")
-
-    return redirect(url_for('index'))
+    flash("Device assignment updated successfully", "success")
+    return redirect(url_for("index"))
 
 @app.route('/some-protected-route')
 @login_required
@@ -189,26 +200,33 @@ def protected():
         return redirect(url_for('index'))
     return "You have accessed a protected admin route."
 
-@app.route('/return', methods=['POST'])
+@app.route('/return_device', methods=['POST'])
 @login_required
+@role_required('admin')
 def return_device():
-    device_name = request.form.get('device')
-    now = datetime.now()
+    sr_no = request.form.get("sr_no")
+    if not sr_no:
+        flash("Missing sr_no", "danger")
+        return redirect(url_for("index"))
 
-    device = Device.query.filter_by(device_name=device_name).first()
+    try:
+        sr_no = int(sr_no)
+    except ValueError:
+        flash("Invalid device ID format", "danger")
+        return redirect(url_for("index"))
+
+    device = DeviceInventory.query.get(sr_no)
     if not device:
-        flash('Device not found.', 'danger')
-        return redirect(url_for('index'))
+        flash("Invalid device ID", "danger")
+        return redirect(url_for("index"))
 
-    device.status = 'Available'
-    device.assigned_to = ''
-    device.updated_on = now
+    device.assigned_to = ""
+    device.status = "Available"
+    device.updated_on = datetime.now()
+
     db.session.commit()
-
-    send_slack_message(f":white_check_mark: *{device_name}* has been returned and is now *available*.")
-    flash(f"{device_name} returned successfully.", "success")
-
-    return redirect(url_for('index'))
+    flash("Device returned successfully", "success")
+    return redirect(url_for("index"))
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -288,14 +306,6 @@ def update_user_role(user_id):
 def logout():
     logout_user()
     return redirect('/login')
-
-if __name__ == '__main__':
-    print("🔍 Testing read_devices() output:")
-    for d in read_devices():
-        print(d)
-
-print("🔧 Manual CSV check:")
-_ = read_devices()
 
 if __name__ == '__main__':
     import os

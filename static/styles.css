@@ -1,91 +1,155 @@
-body {
-    font-family: Arial, sans-serif;
-    background-color: #f2f3f5;
-    margin: 0;
-    padding: 0;
+:root {
+    --primary-color: #007bff;
+    --secondary-color: #6c63ff;
+    --danger-color: #dc3545;
+    --success-color: #28a745;
+    --text-color: #333;
+    --bg-color: #f2f3f5;
+    --card-bg: white;
+    --dark-bg: #121212;
+    --dark-card: #1e1e1e;
+    --font-family: 'Inter', Arial, sans-serif;
 }
 
-.login-container {
+body {
+    font-family: var(--font-family);
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    margin: 0;
+    padding: 0 20px;
+    transition: background 0.3s, color 0.3s;
+}
+
+body.dark {
+    background-color: var(--dark-bg);
+    color: #eee;
+}
+
+.login-container,
+.table-wrapper {
+    background-color: var(--card-bg);
     max-width: 800px;
-    width: 90%;
     margin: 40px auto;
     padding: 30px;
-    background-color: white;
     border-radius: 12px;
-    box-shadow: 0px 0px 12px rgba(0,0,0,0.1);
+    box-shadow: 0px 0px 12px rgba(0, 0, 0, 0.1);
 }
 
-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 20px;
+body.dark .login-container,
+body.dark .table-wrapper {
+    background-color: var(--dark-card);
 }
-
-body.dark .toast.bg-danger {
-    background-color: #ff4d4f;
-    color: #fff;
-}
-body.dark .toast .btn-close-white {
-    filter: invert(1); 
-}
-
 
 h1, .page-title {
     text-align: center;
-    margin: 0;
     font-size: 28px;
-    font-weight: bold;
-}
-
-h2 {
-    text-align: center;
+    font-weight: 600;
     margin-bottom: 20px;
 }
 
-body {
-    font-family: Arial, sans-serif;
-    background-color: #e0e2e7;
-    margin: 0;
-    padding: 0;
+form {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
 }
 
+input[type="text"],
 input[type="email"],
 input[type="password"],
 select {
-    width: 100%;
     padding: 10px;
-    margin-bottom: 15px;
+    font-size: 14px;
     border-radius: 6px;
     border: 1px solid #ccc;
+    min-width: 240px;
 }
 
-.button {
-    background-color: #007bff;
+body.dark input[type="text"],
+body.dark input[type="email"],
+body.dark input[type="password"],
+body.dark select {
+    background-color: #2b2b2b;
+    color: #fff;
+    border-color: #444;
+}
+
+.button,
+button {
+    background-color: var(--primary-color);
     color: white;
-    border: none;
     padding: 10px 16px;
+    font-weight: 600;
+    font-size: 14px;
+    border: none;
     border-radius: 6px;
     cursor: pointer;
-    transition: background 0.3s;
+    transition: background 0.3s ease;
 }
 
-.button:hover {
+.button:hover,
+button:hover {
     background-color: #0056b3;
+}
+
+.button.return {
+    background-color: var(--success-color);
+}
+
+.button.return:hover {
+    background-color: #1e7e34;
+}
+
+.button.logout {
+    background-color: var(--danger-color);
+}
+
+.button.logout:hover {
+    background-color: #bd2130;
 }
 
 table {
     width: 100%;
     border-collapse: collapse;
     margin-top: 20px;
+    border-radius: 8px;
+    overflow: hidden;
+    background-color: var(--card-bg);
+    box-shadow: 0 0 12px rgba(0, 0, 0, 0.05);
 }
 
-table, th, td {
-    border: 1px solid #ccc;
+body.dark table {
+    background-color: var(--dark-card);
 }
 
 th, td {
-    padding: 10px;
+    padding: 16px;
     text-align: center;
+    border: 1px solid #ccc;
+}
+
+th {
+    background-color: #333;
+    color: white;
+    font-size: 14px;
+    text-transform: uppercase;
+}
+
+tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+body.dark tr:nth-child(even) {
+    background-color: #2c2c2c;
+}
+
+tr:hover {
+    background-color: #f1f7ff;
+}
+
+body.dark tr:hover {
+    background-color: #2a3b55;
 }
 
 .flash.success {
@@ -104,76 +168,69 @@ th, td {
     border-radius: 5px;
 }
 
-.manage-users-btn {
-    background: #6c63ff;
-    margin-right: 10px;
-}
-
-/* Ensure dropdown and button are aligned and spaced */
-form.dropdown-form {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    justify-content: center;
-}
-
-
-/* Improve dropdown appearance */
-select {
-    padding: 8px 10px;
-    font-size: 14px;
-    border-radius: 6px;
-    border: 1px solid #ccc;
-    background-color: white;
-    min-width: 120px;
-}
-
-/* Ensure button aligns nicely with dropdown */
-form[method="post"] .button {
-    padding: 8px 14px;
-    font-size: 14px;
-}
-
-/* Mobile responsiveness for small screens */
-@media (max-width: 600px) {
-    form[method="post"] {
-        flex-direction: column;
-        gap: 8px;
-    }
-
-    table, th, td {
-        font-size: 14px;
-    }
-
-    .login-container p {
-    margin-top: 30px;
-    text-align: center;
-    }
-}
-
-.login-container input[type="email"],
-.login-container input[type="password"],
-.login-container .button {
-    max-width: 400px;
-    width: 100%;
+.logo {
+    height: 50px;
     display: block;
-    margin-left: auto;
-    margin-right: auto;
+    margin: 0 auto 8px;
 }
 
-.login-container p {
-    text-align: center;
-    margin-top: 20px;
-    font-size: 14px;
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 24px;
 }
 
-.login-container p a {
-    color: #007bff;
-    text-decoration: none;
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
 }
 
-.login-container p a:hover {
-    text-decoration: underline;
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0;
+    right: 0; bottom: 0;
+    background-color: #ccc;
+    transition: 0.4s;
+    border-radius: 24px;
 }
 
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 4px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.4s;
+    border-radius: 50%;
+}
 
+input:checked + .slider {
+    background-color: var(--primary-color);
+}
+
+input:checked + .slider:before {
+    transform: translateX(26px);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    form, .dropdown-form {
+        flex-direction: column;
+        gap: 10px;
+        align-items: stretch;
+    }
+
+    input[type="text"] {
+        width: 100%;
+    }
+
+    th, td {
+        font-size: 14px;
+        padding: 10px;
+    }
+}
