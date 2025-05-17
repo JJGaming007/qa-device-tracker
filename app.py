@@ -2,16 +2,20 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from models import db, User, DeviceInventory
 from flask_migrate import Migrate
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 from functools import wraps
 from flask import abort
 from flask import Flask, flash, render_template, session, request, redirect, url_for, jsonify, current_app
 from dotenv import load_dotenv
 from dateutil import parser
+import pytz
 import csv
 import os
 import json
 from datetime import datetime, timezone
-from slack_sdk.webhook import WebhookClient
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 import requests
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -75,8 +79,7 @@ with app.app_context():
     print("Device count:", DeviceInventory.query.count())
 
 CSV_FILE = 'devices.csv'
-SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/XXXX/YYYY/ZZZZ"  # Replace with your actual webhook
-webhook = WebhookClient(SLACK_WEBHOOK_URL)
+SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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"
 
 def read_devices():
     devices = []
@@ -106,18 +109,24 @@ def write_devices(devices):
     except Exception as e:
         print("Error writing to CSV:", e)
 
-def send_slack_message(message):
+slack_token = os.environ.get("SLACK_BOT_TOKEN")
+slack_channel = os.environ.get("SLACK_CHANNEL")
+slack_client = WebClient(token=slack_token)
+
+def send_slack_message(message, thread_ts=None):
     try:
-        response = webhook.send(text=message)
-        if not response.status_code == 200:
-            raise Exception(f"WebhookClient failed with {response.status_code}")
-    except Exception:
-        try:
-            response = requests.post(SLACK_WEBHOOK_URL, json={'text': message})
-            if response.status_code != 200:
-                print(f"Slack webhook failed: {response.text}")
-        except Exception as e:
-            print("Slack notification failed:", e)
+        response = slack_client.chat_postMessage(
+            channel=slack_channel,
+            text=message,
+            thread_ts=thread_ts
+        )
+        return response["ts"]  # Return thread timestamp
+    except SlackApiError as e:
+        print(f"Slack API Error: {e.response['error']}")
+    except Exception as ex:
+        print(f"Slack send failed: {ex}")
+    return None
+
 
 @app.route('/')
 @login_required
@@ -170,27 +179,47 @@ def import_csv():
 @login_required
 @role_required('admin')
 def assign_device():
-    sr_no = request.form.get("sr_no")
-    assigned_to = request.form.get("assigned_to", "").strip()
+    try:
+        sr_no = request.form.get("sr_no")
+        assigned_to = request.form.get("assigned_to", "").strip()
 
-    if not sr_no:
-        return jsonify({"success": False, "message": "Missing sr_no"}), 400
+        if not sr_no:
+            flash("Missing device ID", "danger")
+            return redirect(url_for("index"))
 
-    device = DeviceInventory.query.get(sr_no)
-    if not device:
-        return jsonify({"success": False, "message": "Device not found"}), 404
+        device = db.session.get(DeviceInventory, sr_no)
+        if not device:
+            flash("Device not found", "danger")
+            return redirect(url_for("index"))
 
-    if not assigned_to or assigned_to.lower() in ["none", "unassigned"]:
-        device.assigned_to = ""
-        device.status = "Available"
-    else:
-        device.assigned_to = assigned_to
-        device.status = "In Use"
+        now = datetime.now(pytz.timezone("Asia/Kolkata"))
 
-    db.session.commit()
+        if not assigned_to or assigned_to.lower() in ["none", "unassigned"]:
+            device.assigned_to = ""
+            device.status = "Available"
+            if device.slack_ts:
+                send_slack_message("Returned ✅", thread_ts=device.slack_ts)
+        else:
+            device.assigned_to = assigned_to
+            device.status = "In Use"
+            status_message = (
+                f"📱 *{device.device_name}* (S/N: {device.serial_number}) has been *assigned* to *{assigned_to}* "
+                f"by *{current_user.email}* at {now.strftime('%Y-%m-%d %H:%M:%S')} IST."
+            )
+            ts = send_slack_message(status_message)
+            if ts:
+                device.slack_ts = ts
 
-    flash("Device assignment updated successfully", "success")
-    return redirect(url_for("index"))
+        device.updated_on = now
+        db.session.commit()
+
+        flash("Device assignment updated successfully", "success")
+        return redirect(url_for("index"))
+
+    except Exception as e:
+        print("Error in assign_device:", e)
+        flash("An unexpected error occurred", "danger")
+        return redirect(url_for("index"))
 
 @app.route('/some-protected-route')
 @login_required
@@ -222,7 +251,14 @@ def return_device():
 
     device.assigned_to = ""
     device.status = "Available"
-    device.updated_on = datetime.now()
+    ist = pytz.timezone("Asia/Kolkata")
+    device.updated_on = datetime.now(ist)
+
+    # ✅ Reply to Slack thread if exists
+    if device.slack_ts:
+        send_slack_message("Returned ✅", thread_ts=device.slack_ts)
+    else:
+        send_slack_message(f"🔄 *{device.device_name}* (S/N: {device.serial_number}) was returned and is now available.")
 
     db.session.commit()
     flash("Device returned successfully", "success")
