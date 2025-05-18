@@ -14,7 +14,6 @@ import csv
 import os
 import json
 from datetime import datetime, timezone
-from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 import requests
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -79,7 +78,6 @@ with app.app_context():
     print("Device count:", DeviceInventory.query.count())
 
 CSV_FILE = 'devices.csv'
-SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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"
 
 def read_devices():
     devices = []
@@ -109,7 +107,7 @@ def write_devices(devices):
     except Exception as e:
         print("Error writing to CSV:", e)
 
-slack_token = os.environ.get("SLACK_BOT_TOKEN")
+slack_token = os.environ.get("SLACK_API_TOKEN")
 slack_channel = os.environ.get("SLACK_CHANNEL")
 slack_client = WebClient(token=slack_token)
 
