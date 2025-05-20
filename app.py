@@ -33,7 +33,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+socketio.emit('device_data_updated', device_data)
 CORS(app)
 db.init_app(app)
 migrate = Migrate(app, db)
