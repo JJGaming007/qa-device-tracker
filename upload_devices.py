@@ -5,7 +5,7 @@ from datetime import datetime
 conn = psycopg2.connect(
     dbname="neondb",  # or "neondb", based on your project
     user="neondb_owner",            # make sure this matches the username in Neon
-    password="npg_w6CQ1VcxEkvI",  # ⚠️ replace with the actual password
+    password = os.getenv("DB_PASSWORD"),  # ⚠️ replace with the actual password
     host="ep-restless-butterfly-a4a467o5-pooler.us-east-1.aws.neon.tech",
     port="5432",
     sslmode="require"

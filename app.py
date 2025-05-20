@@ -2,6 +2,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from models import db, User, DeviceInventory
 from flask_migrate import Migrate
+from flask_cors import CORS
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from functools import wraps
@@ -27,15 +28,16 @@ app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret')
 db_url = os.environ.get('DATABASE_URL')
 if not db_url:
     raise RuntimeError("DATABASE_URL is not set in the environment.")
+if "sslmode" not in db_url:
+    db_url += "?sslmode=require"
+
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+CORS(app)
 db.init_app(app)
 migrate = Migrate(app, db)
-
-with app.app_context():
-    db.create_all()
-
 
 @app.cli.command("init-db")
 def init_db():
@@ -124,7 +126,6 @@ def send_slack_message(message, thread_ts=None):
     except Exception as ex:
         print(f"Slack send failed: {ex}")
     return None
-
 
 @app.route('/')
 @login_required
@@ -340,6 +341,75 @@ def update_user_role(user_id):
 def logout():
     logout_user()
     return redirect('/login')
+
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    data = request.get_json()
+    if not data or not data.get('email') or not data.get('password'):
+        return jsonify({'error': 'Missing email or password'}), 400
+
+    user = User.query.filter_by(email=data['email']).first()
+    if user and user.check_password(data['password']):
+        login_user(user)
+        return jsonify({'message': 'Login successful', 'role': user.role}), 200
+    return jsonify({'error': 'Invalid credentials'}), 401
+
+@app.route('/api/devices', methods=['GET'])
+@login_required
+def api_devices():
+    devices = DeviceInventory.query.all()
+    return jsonify([
+        {
+            'sr_no': d.sr_no,
+            'device_name': d.device_name,
+            'serial_number': d.serial_number,
+            'status': d.status,
+            'assigned_to': d.assigned_to,
+            'updated_on': d.updated_on.isoformat() if d.updated_on else None,
+            'location': d.location
+        } for d in devices
+    ])
+
+@app.route('/api/assign_device', methods=['POST'])
+@login_required
+def api_assign_device():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    data = request.get_json()
+    sr_no = data.get('sr_no')
+    assigned_to = data.get('assigned_to')
+    location = data.get('location')
+
+    device = DeviceInventory.query.get(sr_no)
+    if not device:
+        return jsonify({'error': 'Device not found'}), 404
+
+    device.status = 'Assigned'
+    device.assigned_to = assigned_to
+    device.updated_on = datetime.now()
+    device.location = location
+    db.session.commit()
+    return jsonify({'message': 'Device assigned successfully'}), 200
+
+@app.route('/api/return_device', methods=['POST'])
+@login_required
+def api_return_device():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    data = request.get_json()
+    sr_no = data.get('sr_no')
+    device = DeviceInventory.query.get(sr_no)
+    if not device:
+        return jsonify({'error': 'Device not found'}), 404
+
+    device.status = 'Available'
+    device.assigned_to = None
+    device.updated_on = datetime.now()
+    device.location = None
+    db.session.commit()
+    return jsonify({'message': 'Device returned successfully'}), 200
 
 if __name__ == '__main__':
     import os
