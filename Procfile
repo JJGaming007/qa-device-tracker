@@ -1,1 +1,1 @@
-web: gunicorn app:app --timeout 120
+web: gunicorn -k eventlet -w 1 app:app
