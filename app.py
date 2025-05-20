@@ -33,7 +33,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-socketio.emit('device_data_updated', device_data)
+socketio = SocketIO(app, cors_allowed_origins="*")
 CORS(app)
 db.init_app(app)
 migrate = Migrate(app, db)
@@ -212,7 +212,6 @@ def assign_device():
         device.updated_on = now
         db.session.commit()
 
-        # Real-time update via SocketIO
         socketio.emit('device_updated', {
             'sr_no': device.sr_no,
             'device_name': device.device_name,
