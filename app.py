@@ -1,25 +1,23 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
+from flask_socketio import SocketIO, emit
 from models import db, User, DeviceInventory
 from flask_migrate import Migrate
 from flask_cors import CORS
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from functools import wraps
-from flask import abort
-from flask import Flask, flash, render_template, session, request, redirect, url_for, jsonify, current_app
+from flask import Flask, flash, render_template, request, redirect, url_for, jsonify
 from dotenv import load_dotenv
 from dateutil import parser
-import pytz
+import pytz, psycopg2
 import csv
 import os
-import json
 from datetime import datetime, timezone
-from slack_sdk.errors import SlackApiError
-import requests
 from werkzeug.security import generate_password_hash, check_password_hash
 
 load_dotenv()
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 print("DATABASE_URL:", os.environ.get("DATABASE_URL"))
 
@@ -35,6 +33,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 CORS(app)
 db.init_app(app)
 migrate = Migrate(app, db)
@@ -71,33 +70,15 @@ def load_user(user_id):
 with app.app_context():
     db.create_all()
 
-    if not User.query.filter_by(email='admin@example.com').first():
-        admin = User(email='admin@example.com', role='admin')
-        admin.set_password('hello123')
+    if not User.query.filter_by(email='admin@supergaming.com').first():
+        admin = User(email='admin@supergaming.com', role='admin')
+        admin.set_password('testing123')
         db.session.add(admin)
         db.session.commit()
 
     print("Device count:", DeviceInventory.query.count())
 
 CSV_FILE = 'devices.csv'
-
-def read_devices():
-    devices = []
-    if not os.path.exists(CSV_FILE):
-        return devices
-
-    with open(CSV_FILE, mode='r', newline='', encoding='utf-8') as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            devices.append({
-                'Sr No': row.get('Sr No', ''),
-                'Device Name': row.get('Device Name', ''),
-                'Serial Number': row.get('Serial Number', ''),
-                'Assigned To': row.get('Assigned To', ''),
-                'Status': row.get('Status', '')
-            })
-    return devices
-
 
 def write_devices(devices):
     fieldnames = ['Sr No', 'Device Name','Serial Number', 'Status', 'Assigned To', 'Updated On', 'Location']
@@ -130,32 +111,46 @@ def send_slack_message(message, thread_ts=None):
 @app.route('/')
 @login_required
 def index():
-    search_query = request.args.get('search', '').strip().lower()
+    search_query = request.args.get('search', '').lower()
 
-    query = DeviceInventory.query
+    conn = psycopg2.connect(db_url)
+    cur = conn.cursor()
+
+    cur.execute("SELECT sr_no, device_name, serial_number, status, assigned_to, updated_on, location FROM device_inventory")
+    rows = cur.fetchall()
+
+    devices = [
+        {
+            'sr_no': row[0],
+            'device_name': row[1],
+            'serial_number': row[2],
+            'status': row[3],
+            'assigned_to': row[4] or "",
+            'updated_on': row[5],
+            'location': row[6]
+        }
+        for row in rows
+    ]
 
     if search_query:
-        query = query.filter(
-            db.or_(
-                DeviceInventory.device_name.ilike(f'%{search_query}%'),
-                DeviceInventory.serial_number.ilike(f'%{search_query}%')
-            )
-        )
+        devices = [
+            d for d in devices
+            if search_query in (d['device_name'] or '').lower()
+               or search_query in (d['serial_number'] or '').lower()
+               or search_query in (d['assigned_to'] or '').lower()
+               or search_query in (d['status'] or '').lower()
+               or search_query in (d['location'] or '').lower()
+        ]
 
-    devices = query.order_by(
-        db.case(
-            (DeviceInventory.status == 'In Use', 0),
-            else_=1
-        ),
-        DeviceInventory.sr_no.asc()
-    ).all()
+    devices.sort(key=lambda d: d['assigned_to'].strip() == '')
+
+    cur.close()
+    conn.close()
 
     return render_template('index.html', devices=devices)
 
 @app.cli.command('import_csv')
 def import_csv():
-    import csv
-    from datetime import datetime, timezone
 
     with open('devices.csv', newline='', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
@@ -179,8 +174,13 @@ def import_csv():
 @role_required('admin')
 def assign_device():
     try:
-        sr_no = request.form.get("sr_no")
-        assigned_to = request.form.get("assigned_to", "").strip()
+        if request.is_json:
+            data = request.get_json()
+            sr_no = data.get("sr_no")
+            assigned_to = data.get("assigned_to", "").strip()
+        else:
+            sr_no = request.form.get("sr_no")
+            assigned_to = request.form.get("assigned_to", "").strip()
 
         if not sr_no:
             flash("Missing device ID", "danger")
@@ -211,6 +211,16 @@ def assign_device():
 
         device.updated_on = now
         db.session.commit()
+
+        # Real-time update via SocketIO
+        socketio.emit('device_updated', {
+            'sr_no': device.sr_no,
+            'device_name': device.device_name,
+            'status': device.status,
+            'assigned_to': device.assigned_to,
+            'updated_on': device.updated_on.isoformat(),
+            'location': device.location
+        }, broadcast=True)
 
         flash("Device assignment updated successfully", "success")
         return redirect(url_for("index"))
@@ -253,13 +263,22 @@ def return_device():
     ist = pytz.timezone("Asia/Kolkata")
     device.updated_on = datetime.now(ist)
 
-    # ✅ Reply to Slack thread if exists
     if device.slack_ts:
         send_slack_message("Returned ✅", thread_ts=device.slack_ts)
     else:
         send_slack_message(f"🔄 *{device.device_name}* (S/N: {device.serial_number}) was returned and is now available.")
 
     db.session.commit()
+
+    socketio.emit('device_updated', {
+        'sr_no': device.sr_no,
+        'device_name': device.device_name,
+        'status': device.status,
+        'assigned_to': '',
+        'updated_on': device.updated_on.isoformat(),
+        'location': device.location
+    }, broadcast=True)
+
     flash("Device returned successfully", "success")
     return redirect(url_for("index"))
 
@@ -277,7 +296,7 @@ def register():
             flash('Email already registered. Please log in.', 'danger')
             return redirect(url_for('login'))
 
-        new_user = User(email=email, role='user')  # Always default to 'user'
+        new_user = User(email=email, role='user')
         new_user.set_password(password)
         db.session.add(new_user)
         db.session.commit()
@@ -323,7 +342,7 @@ def update_user_role(user_id):
     user = User.query.get_or_404(user_id)
     new_role = request.form.get('role')
 
-    if user.email == 'admin@example.com':
+    if user.email == 'admin@supergaming.com':
         flash("You cannot change the role of the default admin.", "warning")
         return redirect(url_for('manage_users'))
 
@@ -414,4 +433,4 @@ def api_return_device():
 if __name__ == '__main__':
     import os
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    socketio.run(app, host='0.0.0.0', port=port)

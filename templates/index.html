@@ -139,7 +139,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
-<!-- Toast init and scroll position -->
 <script>
     document.addEventListener("DOMContentLoaded", function () {
         const toasts = document.querySelectorAll('.toast');
@@ -147,23 +146,17 @@
             const toast = new bootstrap.Toast(el, { delay: 5000 });
             toast.show();
         });
-
-        if ('scrollRestoration' in history) {
-            history.scrollRestoration = 'manual';
-        }
-
-        const scrollPos = localStorage.getItem("scrollPos");
-        if (scrollPos !== null) {
-            window.scrollTo({ top: parseInt(scrollPos), behavior: "auto" });
-            localStorage.removeItem("scrollPos");
-        }
     });
+</script>
 
-    document.querySelectorAll('form').forEach(form => {
-        form.addEventListener('submit', () => {
-            localStorage.setItem("scrollPos", window.scrollY);
-        });
-    });
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+<script>
+  const socket = io();
+
+  socket.on('device_updated', (data) => {
+    console.log('Device updated:', data);
+    location.reload();
+  });
 </script>
 
 </body>
