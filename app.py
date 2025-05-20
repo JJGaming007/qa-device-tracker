@@ -1,6 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from flask_socketio import SocketIO, emit
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 from models import db, User, DeviceInventory
 from flask_migrate import Migrate
 from flask_cors import CORS
@@ -27,9 +28,18 @@ db_url = os.environ.get('DATABASE_URL')
 if not db_url:
     raise RuntimeError("DATABASE_URL is not set in the environment.")
 if "sslmode" not in db_url:
-    db_url += "?sslmode=require"
+    url_parts = list(urlparse(db_url))
+    query = parse_qs(url_parts[4])
+    query["sslmode"] = "require"
+    url_parts[4] = urlencode(query, doseq=True)
+    db_url = urlunparse(url_parts)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'connect_args': {
+        'sslmode': 'require'
+    }
+}
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -375,7 +385,19 @@ def api_login():
 @app.route('/api/devices', methods=['GET'])
 @login_required
 def api_devices():
-    devices = DeviceInventory.query.all()
+    devices = [
+        {
+            'sr_no': d.sr_no,
+            'device_name': d.device_name,
+            'serial_number': d.serial_number,
+            'status': d.status,
+            'assigned_to': d.assigned_to or "",
+            'updated_on': d.updated_on,
+            'location': d.location
+        }
+        for d in devices
+    ]
+
     return jsonify([
         {
             'sr_no': d.sr_no,
