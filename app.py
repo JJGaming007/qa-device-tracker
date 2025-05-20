@@ -219,7 +219,7 @@ def assign_device():
             'assigned_to': device.assigned_to,
             'updated_on': device.updated_on.isoformat(),
             'location': device.location
-        }, broadcast=True)
+        }, namespace='/')
 
         flash("Device assignment updated successfully", "success")
         return redirect(url_for("index"))
@@ -252,7 +252,7 @@ def return_device():
         flash("Invalid device ID format", "danger")
         return redirect(url_for("index"))
 
-    device = DeviceInventory.query.get(sr_no)
+    device = db.session.get(DeviceInventory, sr_no)
     if not device:
         flash("Invalid device ID", "danger")
         return redirect(url_for("index"))
@@ -276,7 +276,7 @@ def return_device():
         'assigned_to': '',
         'updated_on': device.updated_on.isoformat(),
         'location': device.location
-    }, broadcast=True)
+    }, namespace='/')
 
     flash("Device returned successfully", "success")
     return redirect(url_for("index"))
