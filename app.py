@@ -36,10 +36,12 @@ if "sslmode" not in db_url:
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'connect_args': {
-        'sslmode': 'require'
-    }
+    'pool_size': 10,
+    'max_overflow': 5,
+    'pool_timeout': 30,
+    'pool_recycle': 1800,  # recycle every 30 minutes
 }
+
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
