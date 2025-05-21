@@ -1,4 +1,5 @@
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import or_, case, nullslast, text
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from flask_socketio import SocketIO, emit
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
@@ -11,9 +12,8 @@ from functools import wraps
 from flask import Flask, flash, render_template, request, redirect, url_for, jsonify
 from dotenv import load_dotenv
 from dateutil import parser
-import pytz, psycopg2
-import csv
-import os
+from flask_compress import Compress
+import os, pytz, psycopg2, csv, threading
 from datetime import datetime, timezone
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -47,10 +47,16 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 CORS(app)
 db.init_app(app)
 migrate = Migrate(app, db)
+Compress(app)
 
 @app.cli.command("init-db")
 def init_db():
-    db.create_all()
+    try:
+        from sqlalchemy import text
+        db.session.execute(text('SELECT 1'))
+        print("✅ Database is connected and working.")
+    except Exception as e:
+        print("❌ Database connection failed:", e)
     print("Database tables created.")
 
 def role_required(role):
@@ -78,7 +84,13 @@ def load_user(user_id):
     return db.session.get(User, int(user_id))
 
 with app.app_context():
-    db.create_all()
+    from sqlalchemy import text
+
+    try:
+        db.session.execute(text('SELECT 1'))
+        print("✅ Database connected.")
+    except Exception as e:
+        print(f"❌ Database connection failed: {e}")
 
     if not User.query.filter_by(email='admin@supergaming.com').first():
         admin = User(email='admin@supergaming.com', role='admin')
@@ -118,46 +130,42 @@ def send_slack_message(message, thread_ts=None):
         print(f"Slack send failed: {ex}")
     return None
 
+def send_slack_async(message, thread_ts=None):
+    threading.Thread(target=send_slack_message, args=(message, thread_ts)).start()
+
+from sqlalchemy import or_, func
+
 @app.route('/')
 @login_required
 def index():
-    search_query = request.args.get('search', '').lower()
+    search_query = request.args.get('search', '').strip().lower()
 
-    conn = psycopg2.connect(db_url)
-    cur = conn.cursor()
-
-    cur.execute("SELECT sr_no, device_name, serial_number, status, assigned_to, updated_on, location FROM device_inventory")
-    rows = cur.fetchall()
-
-    devices = [
-        {
-            'sr_no': row[0],
-            'device_name': row[1],
-            'serial_number': row[2],
-            'status': row[3],
-            'assigned_to': row[4] or "",
-            'updated_on': row[5],
-            'location': row[6]
-        }
-        for row in rows
-    ]
+    query = DeviceInventory.query
 
     if search_query:
-        devices = [
-            d for d in devices
-            if search_query in (d['device_name'] or '').lower()
-               or search_query in (d['serial_number'] or '').lower()
-               or search_query in (d['assigned_to'] or '').lower()
-               or search_query in (d['status'] or '').lower()
-               or search_query in (d['location'] or '').lower()
-        ]
+        query = query.filter(
+            or_(
+                func.lower(DeviceInventory.device_name).ilike(f'%{search_query}%'),
+                func.lower(DeviceInventory.serial_number).ilike(f'%{search_query}%'),
+                func.lower(DeviceInventory.assigned_to).ilike(f'%{search_query}%'),
+                func.lower(DeviceInventory.status).ilike(f'%{search_query}%'),
+                func.lower(DeviceInventory.location).ilike(f'%{search_query}%'),
+            )
+        )
 
-    devices.sort(key=lambda d: d['assigned_to'].strip() == '')
+    print("Search Query:", search_query)
+    print("Total devices after filter:", query.count())
 
-    cur.close()
-    conn.close()
+    # Order devices by sr_no first to fix jumbled numbers issue
+    devices = query.order_by(
+        DeviceInventory.sr_no.asc(),
+        case((func.lower(DeviceInventory.status) == "in use", 0), else_=1),
+        nullslast(DeviceInventory.updated_on.desc()),
+        nullslast(DeviceInventory.device_name.asc())
+    ).all()
 
     return render_template('index.html', devices=devices)
+
 
 @app.cli.command('import_csv')
 def import_csv():
@@ -207,7 +215,7 @@ def assign_device():
             device.assigned_to = ""
             device.status = "Available"
             if device.slack_ts:
-                send_slack_message("Returned ✅", thread_ts=device.slack_ts)
+                send_slack_async("Returned ✅", thread_ts=device.slack_ts)
         else:
             device.assigned_to = assigned_to
             device.status = "In Use"
@@ -385,19 +393,7 @@ def api_login():
 @app.route('/api/devices', methods=['GET'])
 @login_required
 def api_devices():
-    devices = [
-        {
-            'sr_no': d.sr_no,
-            'device_name': d.device_name,
-            'serial_number': d.serial_number,
-            'status': d.status,
-            'assigned_to': d.assigned_to or "",
-            'updated_on': d.updated_on,
-            'location': d.location
-        }
-        for d in devices
-    ]
-
+    devices = DeviceInventory.query.all()
     return jsonify([
         {
             'sr_no': d.sr_no,
@@ -454,4 +450,4 @@ def api_return_device():
 if __name__ == '__main__':
     import os
     port = int(os.environ.get("PORT", 5000))
-    socketio.run(app, host='0.0.0.0', port=5000)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)

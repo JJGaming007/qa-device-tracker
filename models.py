@@ -23,10 +23,10 @@ class DeviceInventory(db.Model):
     __tablename__ = 'device_inventory'
 
     sr_no = db.Column(db.Integer, primary_key=True)
-    device_name = db.Column(db.String(100))
-    serial_number = db.Column(db.String(100))
-    status = db.Column(db.String(100))
-    assigned_to = db.Column(db.String(100))
+    device_name = db.Column(db.String(255))
+    serial_number = db.Column(db.String(255))
+    status = db.Column(db.String(50))
+    assigned_to = db.Column(db.String(255))
     updated_on = db.Column(db.DateTime, server_default=func.now(), onupdate=func.now())
-    location = db.Column(db.String(100))
-    slack_ts = db.Column(db.String(100))
+    location = db.Column(db.String(255))
+    slack_ts = db.Column(db.String(255))
