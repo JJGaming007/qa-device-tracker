@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <title>QA Device Tracker</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <style>
@@ -51,6 +50,7 @@
         border: none;
         border-radius: 4px;
         font-weight: 500;
+        cursor: pointer;
     }
     .button.logout {
         background-color: #dc3545;
@@ -87,6 +87,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
+        flex-wrap: wrap;
     }
     
     .tally-info {
@@ -95,7 +96,88 @@
         color: #4a6cf7;
     }
 
-    /* ✅ Enhanced Dark Mode Styling */
+    /* Bulk operations styling */
+    .bulk-operations {
+        margin-left: 30px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    
+    .bulk-operations input {
+        padding: 4px 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-size: 0.9rem;
+    }
+    
+    .bulk-operations button {
+        padding: 4px 12px; 
+        font-size: 0.9rem;
+        border-radius: 4px;
+        border: none;
+        font-weight: 500;
+        cursor: pointer;
+    }
+    
+    .bulk-assign-btn {
+        background-color: #28a745;
+        color: white;
+    }
+    
+    .bulk-return-btn {
+        background-color: #ffc107;
+        color: #212529;
+    }
+    
+    .bulk-operations button:hover {
+        opacity: 0.9;
+    }
+    
+    .bulk-operations button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    /* Individual form buttons */
+    .assign-form input[type="text"] {
+        padding: 4px 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-size: 0.85rem;
+        margin-bottom: 4px;
+        width: 120px;
+    }
+
+    .assign-form button {
+        padding: 4px 12px;
+        font-size: 0.85rem;
+    }
+
+    /* Loading states */
+    .loading {
+        opacity: 0.6;
+        pointer-events: none;
+    }
+
+    .spinner-border-sm {
+        width: 1rem;
+        height: 1rem;
+    }
+
+    /* Success/Error indicators */
+    .operation-success {
+        background-color: #d4edda !important;
+        transition: background-color 0.3s ease;
+    }
+
+    .operation-error {
+        background-color: #f8d7da !important;
+        transition: background-color 0.3s ease;
+    }
+
+    /* Dark Mode Styling */
     body.dark {
         background-color: #121212;
         color: #f1f1f1;
@@ -107,7 +189,6 @@
         color: #f1f1f1;
     }
     
-    /* Fixed table dark mode styling */
     body.dark .table {
         background-color: #1e1e1e !important;
         color: #ffffff !important;
@@ -137,7 +218,9 @@
         color: #ffffff !important;
     }
     
-    body.dark .search-container input {
+    body.dark .search-container input,
+    body.dark .bulk-operations input,
+    body.dark .assign-form input {
         background-color: #2e2e2e;
         color: #ffffff;
         border: 1px solid #555;
@@ -169,6 +252,14 @@
     }
     body.dark .tally-info {
         color: #6c8fff;
+    }
+    body.dark .bulk-assign-btn {
+        background-color: #28a745;
+        color: white;
+    }
+    body.dark .bulk-return-btn {
+        background-color: #ffc107;
+        color: #212529;
     }
     
     /* Theme toggle switch styling */
@@ -212,7 +303,6 @@
         transform: translateX(26px);
     }
 </style>
-
 </head>
 <body>
 
@@ -221,52 +311,182 @@
         <input type="checkbox" id="themeToggle">
         <span class="slider"></span>
     </label>
-
-    {% if current_user.is_authenticated and current_user.role == 'admin' %}
-        <a href="{{ url_for('manage_users') }}" class="button">Manage Users</a>
-    {% endif %}
-
-    <form action="{{ url_for('logout') }}" method="get" style="margin: 0;">
-        <button type="submit" class="button logout">Logout</button>
-    </form>
+    <a href="/manage_users" class="button">Manage Users</a>
+    <button type="button" class="button logout" onclick="logout()">Logout</button>
 </div>
 
 <div class="header">
-    <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" class="logo">
+    <img src="/static/logo.png" alt="Logo" class="logo">
     <h1 class="page-title">QA Device Tracker</h1>
 </div>
 
-<div class="toast-container position-fixed top-0 end-0 p-3">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% for category, message in messages %}
-            <div class="toast align-items-center text-white bg-{{ 'danger' if category == 'danger' else 'success' }} border-0" role="alert">
-                <div class="d-flex">
-                    <div class="toast-body">{{ message }}</div>
-                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
-                </div>
-            </div>
-        {% endfor %}
-    {% endwith %}
+<div class="toast-container position-fixed top-0 end-0 p-3" id="toastContainer">
 </div>
 
 <div class="search-container">
-    <form method="get" class="dropdown-form">
-        <input type="text" id="searchBox" name="search" placeholder="Search by device name, serial number, status, or owner" value="{{ request.args.get('search', '') }}">
-        <button type="submit" class="button">Search</button>
-    </form>
+    <input type="text" id="searchBox" placeholder="Search by device name, serial number, status, or owner">
+    <button type="button" class="button" onclick="performSearch()">Search</button>
+    <button type="button" class="button" onclick="clearSearch()">Clear</button>
 </div>
 
 <div class="container">
-    <div class="device-count">
-        Total devices: {{ devices|length }}
-        {% if request.args.get('search') %}(filtered){% endif %}
+    <div class="device-count" id="deviceCount">
+        Loading devices...
     </div>
 
-    {% if devices %}
+    <div id="devicesContainer">
+        <!-- Devices will be loaded here -->
+    </div>
+</div>
+
+<!-- Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// Global variables
+let devices = [];
+let filteredDevices = [];
+let currentSearch = '';
+
+// Initialize the application
+document.addEventListener('DOMContentLoaded', function() {
+    initializeTheme();
+    loadDevices();
+    setupSearchEvents();
+});
+
+// Theme management
+function initializeTheme() {
+    const toggle = document.getElementById('themeToggle');
+    const body = document.body;
+    const theme = localStorage.getItem('theme');
+    
+    if (theme === 'dark') {
+        body.classList.add('dark');
+        toggle.checked = true;
+    }
+    
+    toggle.addEventListener('change', () => {
+        body.classList.toggle('dark');
+        localStorage.setItem('theme', body.classList.contains('dark') ? 'dark' : 'light');
+    });
+}
+
+// Search functionality
+function setupSearchEvents() {
+    const searchBox = document.getElementById('searchBox');
+    
+    // Get search from URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const searchParam = urlParams.get('search');
+    if (searchParam) {
+        searchBox.value = searchParam;
+        currentSearch = searchParam;
+    }
+    
+    // Real-time search
+    searchBox.addEventListener('input', debounce(performSearch, 300));
+    searchBox.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            performSearch();
+        }
+    });
+}
+
+function performSearch() {
+    const searchBox = document.getElementById('searchBox');
+    const query = searchBox.value.trim().toLowerCase();
+    currentSearch = query;
+    
+    // Update URL without page reload
+    const url = new URL(window.location);
+    if (query) {
+        url.searchParams.set('search', query);
+    } else {
+        url.searchParams.delete('search');
+    }
+    window.history.replaceState({}, '', url);
+    
+    filterDevices(query);
+    renderDevices();
+}
+
+function clearSearch() {
+    const searchBox = document.getElementById('searchBox');
+    searchBox.value = '';
+    currentSearch = '';
+    
+    // Update URL
+    const url = new URL(window.location);
+    url.searchParams.delete('search');
+    window.history.replaceState({}, '', url);
+    
+    filterDevices('');
+    renderDevices();
+}
+
+function filterDevices(query) {
+    if (!query) {
+        filteredDevices = [...devices];
+        return;
+    }
+    
+    filteredDevices = devices.filter(device => {
+        return (
+            device.device_name.toLowerCase().includes(query) ||
+            device.serial_number.toLowerCase().includes(query) ||
+            device.status.toLowerCase().includes(query) ||
+            (device.assigned_to && device.assigned_to.toLowerCase().includes(query)) ||
+            (device.location && device.location.toLowerCase().includes(query))
+        );
+    });
+}
+
+// Load devices from API
+async function loadDevices() {
+    try {
+        const response = await fetch('/api/devices');
+        if (!response.ok) {
+            throw new Error('Failed to load devices');
+        }
+        
+        devices = await response.json();
+        
+        // Sort devices by sr_no
+        devices.sort((a, b) => a.sr_no - b.sr_no);
+        
+        filterDevices(currentSearch);
+        renderDevices();
+        
+    } catch (error) {
+        console.error('Error loading devices:', error);
+        showToast('Failed to load devices', 'danger');
+    }
+}
+
+// Render devices table
+function renderDevices() {
+    const container = document.getElementById('devicesContainer');
+    const deviceCount = document.getElementById('deviceCount');
+    
+    // Update device count
+    deviceCount.textContent = `Total devices: ${filteredDevices.length}${currentSearch ? ' (filtered)' : ''}`;
+    
+    if (filteredDevices.length === 0) {
+        container.innerHTML = '<p>No device data found.</p>';
+        return;
+    }
+    
+    const html = `
         <div class="select-all-container">
             <input type="checkbox" id="selectAll" class="device-checkbox">
             <label for="selectAll">Select All</label>
             <span class="tally-info" id="tallyInfo">Selected: 0</span>
+            
+            <div class="bulk-operations">
+                <input type="text" id="bulkAssignName" placeholder="Assign to..." style="display: none;">
+                <button type="button" id="bulkAssignBtn" class="bulk-assign-btn" disabled>Bulk Assign</button>
+                <button type="button" id="bulkReturnBtn" class="bulk-return-btn" disabled>Bulk Return</button>
+            </div>
         </div>
         
         <table class="table table-hover">
@@ -284,122 +504,320 @@
                 </tr>
             </thead>
             <tbody>
-                {% for device in devices %}
-                <tr>
-                    <td>
-                        <input type="checkbox" class="device-checkbox device-select" data-sr-no="{{ device.sr_no }}">
-                    </td>
-                    <td>{{ device.sr_no }}</td>
-                    <td>{{ device.device_name }}</td>
-                    <td>{{ device.serial_number }}</td>
-                    <td>{{ device.status }}</td>
-                    <td>{{ device.assigned_to or 'Not assigned' }}</td>
-                    <td>{{ device.updated_on.strftime('%Y-%m-%d %H:%M') if device.updated_on else 'N/A' }}</td>
-                    <td>
-                        {% if not device.assigned_to %}
-                        <form action="{{ url_for('assign_device') }}" method="post" class="d-flex flex-column gap-1">
-                            <input type="hidden" name="sr_no" value="{{ device.sr_no }}">
-                            <input type="text" name="assigned_to" placeholder="Name">
-                            <button type="submit" class="btn btn-sm btn-primary">Assign</button>
-                        </form>
-                        {% else %}—{% endif %}
-                    </td>
-                    <td>
-                        {% if device.assigned_to %}
-                        <form action="{{ url_for('return_device') }}" method="post">
-                            <input type="hidden" name="sr_no" value="{{ device.sr_no }}">
-                            <button type="submit" class="btn btn-sm btn-warning">Return</button>
-                        </form>
-                        {% else %}—{% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
+                ${filteredDevices.map(device => `
+                    <tr id="device-row-${device.sr_no}">
+                        <td>
+                            <input type="checkbox" class="device-checkbox device-select" 
+                                   data-sr-no="${device.sr_no}" 
+                                   data-status="${device.status}" 
+                                   data-assigned="${device.assigned_to || ''}">
+                        </td>
+                        <td>${device.sr_no}</td>
+                        <td>${device.device_name}</td>
+                        <td>${device.serial_number}</td>
+                        <td>${device.status}</td>
+                        <td>${device.assigned_to || 'Not assigned'}</td>
+                        <td>${device.updated_on ? new Date(device.updated_on).toLocaleString() : 'N/A'}</td>
+                        <td>
+                            ${!device.assigned_to ? `
+                                <div class="assign-form">
+                                    <input type="text" placeholder="Name" id="assign-input-${device.sr_no}">
+                                    <button type="button" class="btn btn-sm btn-primary" 
+                                            onclick="assignDevice(${device.sr_no})">Assign</button>
+                                </div>
+                            ` : '—'}
+                        </td>
+                        <td>
+                            ${device.assigned_to ? `
+                                <button type="button" class="btn btn-sm btn-warning" 
+                                        onclick="returnDevice(${device.sr_no})">Return</button>
+                            ` : '—'}
+                        </td>
+                    </tr>
+                `).join('')}
             </tbody>
         </table>
-    {% else %}
-        <p>No device data found.</p>
-    {% endif %}
-</div>
+    `;
+    
+    container.innerHTML = html;
+    setupCheckboxEvents();
+}
 
-<!-- Scripts -->
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+// Setup checkbox functionality
+function setupCheckboxEvents() {
+    const selectAllCheckbox = document.getElementById('selectAll');
+    const deviceCheckboxes = document.querySelectorAll('.device-select');
+    const tallyInfo = document.getElementById('tallyInfo');
+    const bulkAssignBtn = document.getElementById('bulkAssignBtn');
+    const bulkReturnBtn = document.getElementById('bulkReturnBtn');
+    const bulkAssignName = document.getElementById('bulkAssignName');
 
-<script>
-    // Theme toggle
-    const toggle = document.getElementById('themeToggle');
-    const body = document.body;
-
-    toggle.addEventListener('change', () => {
-        body.classList.toggle('dark');
-        localStorage.setItem('theme', body.classList.contains('dark') ? 'dark' : 'light');
-    });
-
-    window.onload = () => {
-        const theme = localStorage.getItem('theme');
-        if (theme === 'dark') {
-            body.classList.add('dark');
-            toggle.checked = true;
+    function updateTally() {
+        const checkedBoxes = document.querySelectorAll('.device-select:checked');
+        const checkedCount = checkedBoxes.length;
+        tallyInfo.textContent = `Selected: ${checkedCount}`;
+        
+        if (checkedCount > 0) {
+            const canAssign = Array.from(checkedBoxes).some(cb => !cb.dataset.assigned || cb.dataset.assigned === '');
+            const canReturn = Array.from(checkedBoxes).some(cb => cb.dataset.assigned && cb.dataset.assigned !== '');
+            
+            bulkAssignBtn.disabled = !canAssign;
+            bulkReturnBtn.disabled = !canReturn;
+            
+            if (canAssign) {
+                bulkAssignName.style.display = 'inline-block';
+            } else {
+                bulkAssignName.style.display = 'none';
+            }
+        } else {
+            bulkAssignBtn.disabled = true;
+            bulkReturnBtn.disabled = true;
+            bulkAssignName.style.display = 'none';
         }
-    };
+    }
 
-    // Auto-hide toast
-    document.addEventListener("DOMContentLoaded", function () {
-        const toasts = document.querySelectorAll('.toast');
-        toasts.forEach(el => new bootstrap.Toast(el, { delay: 5000 }).show());
-    });
-
-    // Auto-clear search
-    document.getElementById('searchBox').addEventListener('input', function () {
-        if (this.value.trim() === '') {
-            const url = new URL(window.location);
-            url.searchParams.delete('search');
-            window.location.href = url.toString();
-        }
-    });
-
-    // Live reload on device update
-    const socket = io();
-    socket.on('device_updated', (data) => {
-        console.log('Device updated:', data);
-        location.reload();
-    });
-
-    // Checkbox functionality for tallying
-    document.addEventListener('DOMContentLoaded', function() {
-        const selectAllCheckbox = document.getElementById('selectAll');
-        const deviceCheckboxes = document.querySelectorAll('.device-select');
-        const tallyInfo = document.getElementById('tallyInfo');
-
-        // Update tally count
-        function updateTally() {
-            const checkedCount = document.querySelectorAll('.device-select:checked').length;
-            tallyInfo.textContent = `Selected: ${checkedCount}`;
-        }
-
-        // Select all functionality
-        selectAllCheckbox.addEventListener('change', function() {
-            deviceCheckboxes.forEach(checkbox => {
-                checkbox.checked = this.checked;
-            });
-            updateTally();
-        });
-
-        // Individual checkbox change
+    // Select all functionality
+    selectAllCheckbox.addEventListener('change', function() {
         deviceCheckboxes.forEach(checkbox => {
-            checkbox.addEventListener('change', function() {
-                // Update select all checkbox state
-                const checkedCount = document.querySelectorAll('.device-select:checked').length;
-                selectAllCheckbox.checked = checkedCount === deviceCheckboxes.length;
-                selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < deviceCheckboxes.length;
-                
-                updateTally();
-            });
+            checkbox.checked = this.checked;
         });
-
-        // Initialize tally
         updateTally();
     });
+
+    // Individual checkbox change
+    deviceCheckboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            const checkedCount = document.querySelectorAll('.device-select:checked').length;
+            selectAllCheckbox.checked = checkedCount === deviceCheckboxes.length;
+            selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < deviceCheckboxes.length;
+            updateTally();
+        });
+    });
+
+    // Bulk operations
+    bulkAssignBtn.addEventListener('click', performBulkAssign);
+    bulkReturnBtn.addEventListener('click', performBulkReturn);
+    
+    updateTally();
+}
+
+// Device operations
+async function assignDevice(srNo) {
+    const input = document.getElementById(`assign-input-${srNo}`);
+    const assignedTo = input.value.trim();
+    
+    if (!assignedTo) {
+        showToast('Please enter a name', 'danger');
+        input.focus();
+        return;
+    }
+    
+    const row = document.getElementById(`device-row-${srNo}`);
+    row.classList.add('loading');
+    
+    try {
+        const response = await fetch('/assign_device', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                sr_no: srNo,
+                assigned_to: assignedTo,
+                search: currentSearch
+            })
+        });
+        
+        if (response.ok) {
+            showToast('Device assigned successfully', 'success');
+            row.classList.add('operation-success');
+            setTimeout(() => {
+                row.classList.remove('operation-success');
+                loadDevices(); // Refresh data
+            }, 1000);
+        } else {
+            throw new Error('Assignment failed');
+        }
+    } catch (error) {
+        console.error('Error assigning device:', error);
+        showToast('Failed to assign device', 'danger');
+        row.classList.add('operation-error');
+        setTimeout(() => row.classList.remove('operation-error'), 2000);
+    } finally {
+        row.classList.remove('loading');
+    }
+}
+
+async function returnDevice(srNo) {
+    const row = document.getElementById(`device-row-${srNo}`);
+    row.classList.add('loading');
+    
+    try {
+        const response = await fetch('/return_device', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                sr_no: srNo,
+                search: currentSearch
+            })
+        });
+        
+        if (response.ok) {
+            showToast('Device returned successfully', 'success');
+            row.classList.add('operation-success');
+            setTimeout(() => {
+                row.classList.remove('operation-success');
+                loadDevices(); // Refresh data
+            }, 1000);
+        } else {
+            throw new Error('Return failed');
+        }
+    } catch (error) {
+        console.error('Error returning device:', error);
+        showToast('Failed to return device', 'danger');
+        row.classList.add('operation-error');
+        setTimeout(() => row.classList.remove('operation-error'), 2000);
+    } finally {
+        row.classList.remove('loading');
+    }
+}
+
+async function performBulkAssign() {
+    const selectedDevices = Array.from(document.querySelectorAll('.device-select:checked'))
+        .filter(cb => !cb.dataset.assigned || cb.dataset.assigned === '')
+        .map(cb => cb.dataset.srNo);
+    
+    const assignToName = document.getElementById('bulkAssignName').value.trim();
+    
+    if (selectedDevices.length === 0) {
+        showToast('No available devices selected for assignment', 'danger');
+        return;
+    }
+    
+    if (!assignToName) {
+        showToast('Please enter a name to assign the devices to', 'danger');
+        document.getElementById('bulkAssignName').focus();
+        return;
+    }
+    
+    if (!confirm(`Assign ${selectedDevices.length} devices to "${assignToName}"?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/bulk_operation', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                operation: 'assign',
+                device_ids: selectedDevices,
+                assigned_to: assignToName,
+                search: currentSearch
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            loadDevices(); // Refresh data
+        } else {
+            throw new Error(result.message || 'Bulk assignment failed');
+        }
+    } catch (error) {
+        console.error('Error in bulk assign:', error);
+        showToast('Failed to assign devices', 'danger');
+    }
+}
+
+async function performBulkReturn() {
+    const selectedDevices = Array.from(document.querySelectorAll('.device-select:checked'))
+        .filter(cb => cb.dataset.assigned && cb.dataset.assigned !== '')
+        .map(cb => cb.dataset.srNo);
+    
+    if (selectedDevices.length === 0) {
+        showToast('No assigned devices selected for return', 'danger');
+        return;
+    }
+    
+    if (!confirm(`Return ${selectedDevices.length} devices?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/bulk_operation', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                operation: 'return',
+                device_ids: selectedDevices,
+                search: currentSearch
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            loadDevices(); // Refresh data
+        } else {
+            throw new Error(result.message || 'Bulk return failed');
+        }
+    } catch (error) {
+        console.error('Error in bulk return:', error);
+        showToast('Failed to return devices', 'danger');
+    }
+}
+
+// Utility functions
+function showToast(message, type = 'success') {
+    const toastContainer = document.getElementById('toastContainer');
+    const toastId = 'toast-' + Date.now();
+    
+    const toastHtml = `
+        <div class="toast align-items-center text-white bg-${type === 'danger' ? 'danger' : 'success'} border-0" 
+             role="alert" id="${toastId}">
+            <div class="d-flex">
+                <div class="toast-body">${message}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" 
+                        data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+        </div>
+    `;
+    
+    toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+    
+    const toastElement = document.getElementById(toastId);
+    const toast = new bootstrap.Toast(toastElement, { delay: 5000 });
+    toast.show();
+    
+    // Clean up after toast is hidden
+    toastElement.addEventListener('hidden.bs.toast', () => {
+        toastElement.remove();
+    });
+}
+
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+function logout() {
+    window.location.href = '/logout';
+}
 </script>
 </body>
 </html>

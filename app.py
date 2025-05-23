@@ -16,6 +16,8 @@ from flask_compress import Compress
 import os, pytz, psycopg2, csv, threading
 from datetime import datetime, timezone
 from werkzeug.security import generate_password_hash, check_password_hash
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -36,20 +38,29 @@ if "sslmode" not in db_url:
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_size': 10,
-    'max_overflow': 5,
-    'pool_timeout': 30,
-    'pool_recycle': 1800,  # recycle every 30 minutes
+    'pool_size': 20,  # Increased from 10
+    'max_overflow': 10,  # Increased from 5
+    'pool_timeout': 10,  # Reduced from 30
+    'pool_recycle': 1800,
+    'pool_pre_ping': True,  # Added for connection health checks
 }
-
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-socketio = SocketIO(app, cors_allowed_origins="*")
+# Optimized SocketIO configuration
+socketio = SocketIO(app,
+                    cors_allowed_origins="*",
+                    async_mode='threading',  # Use threading for better performance
+                    ping_timeout=60,
+                    ping_interval=25)
 CORS(app)
 db.init_app(app)
 migrate = Migrate(app, db)
 Compress(app)
+
+# Thread pool for async operations
+executor = ThreadPoolExecutor(max_workers=10)
+
 
 @app.cli.command("init-db")
 def init_db():
@@ -61,6 +72,7 @@ def init_db():
         print("❌ Database connection failed:", e)
     print("Database tables created.")
 
+
 def role_required(role):
     def decorator(f):
         @wraps(f)
@@ -69,7 +81,9 @@ def role_required(role):
                 flash('Access denied.', 'danger')
                 return redirect(url_for('index'))
             return f(*args, **kwargs)
+
         return decorated_function
+
     return decorator
 
 
@@ -77,13 +91,16 @@ login_manager = LoginManager()
 login_manager.login_view = 'login'
 login_manager.init_app(app)
 
+
 @login_manager.unauthorized_handler
 def unauthorized_callback():
     return redirect(url_for('login', next=request.endpoint))
 
+
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
+
 
 with app.app_context():
     from sqlalchemy import text
@@ -104,8 +121,9 @@ with app.app_context():
 
 CSV_FILE = 'devices.csv'
 
+
 def write_devices(devices):
-    fieldnames = ['Sr No', 'Device Name','Serial Number', 'Status', 'Assigned To', 'Updated On', 'Location']
+    fieldnames = ['Sr No', 'Device Name', 'Serial Number', 'Status', 'Assigned To', 'Updated On', 'Location']
     try:
         with open(CSV_FILE, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -114,28 +132,139 @@ def write_devices(devices):
     except Exception as e:
         print("Error writing to CSV:", e)
 
+
 slack_token = os.environ.get("SLACK_API_TOKEN")
 slack_channel = os.environ.get("SLACK_CHANNEL")
-slack_client = WebClient(token=slack_token)
+slack_client = WebClient(token=slack_token) if slack_token else None
+
 
 def send_slack_message(message, thread_ts=None):
-    try:
-        response = slack_client.chat_postMessage(
-            channel=slack_channel,
-            text=message,
-            thread_ts=thread_ts
-        )
-        return response["ts"]  # Return thread timestamp
-    except SlackApiError as e:
-        print(f"Slack API Error: {e.response['error']}")
-    except Exception as ex:
-        print(f"Slack send failed: {ex}")
-    return None
+    """Non-blocking Slack message sending"""
+    if not slack_client:
+        return None
+
+    def _send():
+        try:
+            response = slack_client.chat_postMessage(
+                channel=slack_channel,
+                text=message,
+                thread_ts=thread_ts
+            )
+            return response["ts"]
+        except SlackApiError as e:
+            print(f"Slack API Error: {e.response['error']}")
+        except Exception as ex:
+            print(f"Slack send failed: {ex}")
+        return None
+
+    # Submit to thread pool and return immediately
+    future = executor.submit(_send)
+    return future
+
 
 def send_slack_async(message, thread_ts=None):
-    threading.Thread(target=send_slack_message, args=(message, thread_ts)).start()
+    """Async Slack message sending - fire and forget"""
+    if slack_client:
+        executor.submit(send_slack_message, message, thread_ts)
+
+
+def emit_device_update(device):
+    """Optimized device update emission"""
+    socketio.emit('device_updated', {
+        'sr_no': device.sr_no,
+        'device_name': device.device_name,
+        'status': device.status,
+        'assigned_to': device.assigned_to or '',
+        'updated_on': device.updated_on.isoformat() if device.updated_on else '',
+        'location': device.location or ''
+    }, namespace='/')
+
+
+@app.route('/bulk_operation', methods=['POST'])
+@login_required
+@role_required('admin')
+def bulk_operation():
+    try:
+        data = request.get_json()
+        operation = data.get('operation')
+        device_ids = data.get('device_ids', [])
+        assigned_to = data.get('assigned_to', '').strip()
+
+        if not device_ids:
+            return jsonify({'success': False, 'message': 'No devices selected'}), 400
+
+        ist = pytz.timezone("Asia/Kolkata")
+        now = datetime.now(ist)
+
+        # Batch query all devices at once
+        devices = db.session.query(DeviceInventory).filter(
+            DeviceInventory.sr_no.in_([int(id) for id in device_ids if str(id).isdigit()])
+        ).all()
+
+        updated_devices = []
+        slack_messages = []
+
+        for device in devices:
+            original_status = device.status
+            original_assigned = device.assigned_to
+
+            if operation == 'assign' and assigned_to:
+                if not device.assigned_to:
+                    device.assigned_to = assigned_to
+                    device.status = "In Use"
+                    device.updated_on = now
+                    updated_devices.append(device)
+
+                    # Prepare Slack message for async sending
+                    slack_messages.append({
+                        'message': f"📱 *{device.device_name}* (S/N: {device.serial_number}) has been *assigned* to *{assigned_to}* by *{current_user.email}* at {now.strftime('%Y-%m-%d %H:%M:%S')} IST (Bulk Operation).",
+                        'device': device
+                    })
+
+            elif operation == 'return':
+                if device.assigned_to:
+                    device.assigned_to = ""
+                    device.status = "Available"
+                    device.updated_on = now
+                    updated_devices.append(device)
+
+                    # Prepare Slack message for async sending
+                    if device.slack_ts:
+                        slack_messages.append({
+                            'message': "Returned ✅ (Bulk Operation)",
+                            'thread_ts': device.slack_ts
+                        })
+                    else:
+                        slack_messages.append({
+                            'message': f"🔄 *{device.device_name}* (S/N: {device.serial_number}) was returned and is now available (Bulk Operation)."
+                        })
+
+        # Commit all changes at once
+        if updated_devices:
+            db.session.commit()
+
+        # Send Slack messages asynchronously
+        for msg_data in slack_messages:
+            send_slack_async(msg_data['message'], msg_data.get('thread_ts'))
+
+        # Emit socket events for all updated devices
+        for device in updated_devices:
+            emit_device_update(device)
+
+        operation_word = "assigned" if operation == 'assign' else "returned"
+        return jsonify({
+            'success': True,
+            'message': f'{len(updated_devices)} devices {operation_word} successfully'
+        }), 200
+
+    except Exception as e:
+        print("Error in bulk_operation:", e)
+        db.session.rollback()
+        return jsonify({'success': False, 'message': 'An unexpected error occurred'}), 500
+
 
 from sqlalchemy import or_, func
+
 
 @app.route('/')
 @login_required
@@ -155,10 +284,7 @@ def index():
             )
         )
 
-    print("Search Query:", search_query)
-    print("Total devices after filter:", query.count())
-
-    # Order devices by sr_no first to fix jumbled numbers issue
+    # Optimized ordering
     devices = query.order_by(
         DeviceInventory.sr_no.asc(),
         case((func.lower(DeviceInventory.status) == "in use", 0), else_=1),
@@ -166,12 +292,11 @@ def index():
         nullslast(DeviceInventory.device_name.asc())
     ).all()
 
-    return render_template('index.html', devices=devices)
+    return render_template('index.html', devices=devices, search_query=search_query)
 
 
 @app.cli.command('import_csv')
 def import_csv():
-
     with open('devices.csv', newline='', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
@@ -198,56 +323,92 @@ def assign_device():
             data = request.get_json()
             sr_no = data.get("sr_no")
             assigned_to = data.get("assigned_to", "").strip()
+            search_param = data.get("search", "")
+            return_json = True
         else:
             sr_no = request.form.get("sr_no")
             assigned_to = request.form.get("assigned_to", "").strip()
+            search_param = request.form.get("search", "")
+            return_json = False
 
         if not sr_no:
+            if return_json:
+                return jsonify({'success': False, 'message': 'Missing device ID'}), 400
             flash("Missing device ID", "danger")
-            return redirect(url_for("index"))
+            return redirect(url_for("index", search=search_param))
 
         device = db.session.get(DeviceInventory, sr_no)
         if not device:
+            if return_json:
+                return jsonify({'success': False, 'message': 'Device not found'}), 404
             flash("Device not found", "danger")
-            return redirect(url_for("index"))
+            return redirect(url_for("index", search=search_param))
 
         now = datetime.now(pytz.timezone("Asia/Kolkata"))
 
+        # Update device first
         if not assigned_to or assigned_to.lower() in ["none", "unassigned"]:
             device.assigned_to = ""
             device.status = "Available"
-            if device.slack_ts:
-                send_slack_async("Returned ✅", thread_ts=device.slack_ts)
+            operation_type = "returned"
         else:
             device.assigned_to = assigned_to
             device.status = "In Use"
+            operation_type = "assigned"
+
+        device.updated_on = now
+
+        # Commit changes first
+        db.session.commit()
+
+        # Emit socket update immediately after DB commit
+        emit_device_update(device)
+
+        # Send Slack messages asynchronously (non-blocking)
+        if operation_type == "returned" and device.slack_ts:
+            send_slack_async("Returned ✅", thread_ts=device.slack_ts)
+        elif operation_type == "assigned":
             status_message = (
                 f"📱 *{device.device_name}* (S/N: {device.serial_number}) has been *assigned* to *{assigned_to}* "
                 f"by *{current_user.email}* at {now.strftime('%Y-%m-%d %H:%M:%S')} IST."
             )
-            ts = send_slack_message(status_message)
-            if ts:
-                device.slack_ts = ts
 
-        device.updated_on = now
-        db.session.commit()
+            # Handle Slack timestamp update asynchronously
+            def handle_slack():
+                try:
+                    future = send_slack_message(status_message)
+                    if future:
+                        ts = future.result(timeout=3)  # Short timeout
+                        if ts:
+                            device.slack_ts = ts
+                            db.session.commit()
+                except:
+                    pass  # Ignore Slack failures
 
-        socketio.emit('device_updated', {
-            'sr_no': device.sr_no,
-            'device_name': device.device_name,
-            'status': device.status,
-            'assigned_to': device.assigned_to,
-            'updated_on': device.updated_on.isoformat(),
-            'location': device.location
-        }, namespace='/')
+            executor.submit(handle_slack)
 
-        flash("Device assignment updated successfully", "success")
-        return redirect(url_for("index"))
+        if return_json:
+            return jsonify({
+                'success': True,
+                'message': f'Device {operation_type} successfully',
+                'device': {
+                    'sr_no': device.sr_no,
+                    'status': device.status,
+                    'assigned_to': device.assigned_to
+                }
+            }), 200
+
+        flash(f"Device {operation_type} successfully", "success")
+        return redirect(url_for("index", search=search_param))
 
     except Exception as e:
         print("Error in assign_device:", e)
+        db.session.rollback()
+        if return_json:
+            return jsonify({'success': False, 'message': 'An unexpected error occurred'}), 500
         flash("An unexpected error occurred", "danger")
-        return redirect(url_for("index"))
+        return redirect(url_for("index", search=search_param))
+
 
 @app.route('/some-protected-route')
 @login_required
@@ -257,49 +418,84 @@ def protected():
         return redirect(url_for('index'))
     return "You have accessed a protected admin route."
 
+
 @app.route('/return_device', methods=['POST'])
 @login_required
 @role_required('admin')
 def return_device():
-    sr_no = request.form.get("sr_no")
-    if not sr_no:
-        flash("Missing sr_no", "danger")
-        return redirect(url_for("index"))
-
     try:
-        sr_no = int(sr_no)
-    except ValueError:
-        flash("Invalid device ID format", "danger")
-        return redirect(url_for("index"))
+        if request.is_json:
+            data = request.get_json()
+            sr_no = data.get("sr_no")
+            search_param = data.get("search", "")
+            return_json = True
+        else:
+            sr_no = request.form.get("sr_no")
+            search_param = request.form.get("search", "")
+            return_json = False
 
-    device = db.session.get(DeviceInventory, sr_no)
-    if not device:
-        flash("Invalid device ID", "danger")
-        return redirect(url_for("index"))
+        if not sr_no:
+            if return_json:
+                return jsonify({'success': False, 'message': 'Missing sr_no'}), 400
+            flash("Missing sr_no", "danger")
+            return redirect(url_for("index", search=search_param))
 
-    device.assigned_to = ""
-    device.status = "Available"
-    ist = pytz.timezone("Asia/Kolkata")
-    device.updated_on = datetime.now(ist)
+        try:
+            sr_no = int(sr_no)
+        except ValueError:
+            if return_json:
+                return jsonify({'success': False, 'message': 'Invalid device ID format'}), 400
+            flash("Invalid device ID format", "danger")
+            return redirect(url_for("index", search=search_param))
 
-    if device.slack_ts:
-        send_slack_message("Returned ✅", thread_ts=device.slack_ts)
-    else:
-        send_slack_message(f"🔄 *{device.device_name}* (S/N: {device.serial_number}) was returned and is now available.")
+        device = db.session.get(DeviceInventory, sr_no)
+        if not device:
+            if return_json:
+                return jsonify({'success': False, 'message': 'Invalid device ID'}), 404
+            flash("Invalid device ID", "danger")
+            return redirect(url_for("index", search=search_param))
 
-    db.session.commit()
+        # Update device first
+        device.assigned_to = ""
+        device.status = "Available"
+        ist = pytz.timezone("Asia/Kolkata")
+        device.updated_on = datetime.now(ist)
 
-    socketio.emit('device_updated', {
-        'sr_no': device.sr_no,
-        'device_name': device.device_name,
-        'status': device.status,
-        'assigned_to': '',
-        'updated_on': device.updated_on.isoformat(),
-        'location': device.location
-    }, namespace='/')
+        # Commit changes first
+        db.session.commit()
 
-    flash("Device returned successfully", "success")
-    return redirect(url_for("index"))
+        # Emit socket update immediately after DB commit
+        emit_device_update(device)
+
+        # Send Slack messages asynchronously (non-blocking)
+        if device.slack_ts:
+            send_slack_async("Returned ✅", thread_ts=device.slack_ts)
+        else:
+            send_slack_async(
+                f"🔄 *{device.device_name}* (S/N: {device.serial_number}) was returned and is now available.")
+
+        if return_json:
+            return jsonify({
+                'success': True,
+                'message': 'Device returned successfully',
+                'device': {
+                    'sr_no': device.sr_no,
+                    'status': device.status,
+                    'assigned_to': ''
+                }
+            }), 200
+
+        flash("Device returned successfully", "success")
+        return redirect(url_for("index", search=search_param))
+
+    except Exception as e:
+        print("Error in return_device:", e)
+        db.session.rollback()
+        if return_json:
+            return jsonify({'success': False, 'message': 'An unexpected error occurred'}), 500
+        flash("An unexpected error occurred", "danger")
+        return redirect(url_for("index", search=search_param))
+
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -324,6 +520,7 @@ def register():
 
     return render_template('register.html')
 
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -340,24 +537,27 @@ def login():
 
     return render_template('login.html')
 
-@app.route('/admin/users', methods=['GET', 'POST'])
-@login_required
-def manage_users():
-    if current_user.role != 'admin':
-        flash("Access denied. Admins only.", "danger")
-        return redirect(url_for('index'))
 
+@app.route('/manage_users', methods=['GET', 'POST'])
+@login_required
+@role_required('admin')
+def manage_users():
     users = User.query.all()
     return render_template('admin_users.html', users=users)
 
 
+# Keep the old route for backward compatibility
+@app.route('/admin/users', methods=['GET', 'POST'])
+@login_required
+@role_required('admin')
+def admin_users():
+    return redirect(url_for('manage_users'))
+
+
 @app.route('/admin/update_role/<int:user_id>', methods=['POST'])
 @login_required
+@role_required('admin')
 def update_user_role(user_id):
-    if current_user.role != 'admin':
-        flash("Access denied.", "danger")
-        return redirect(url_for('index'))
-
     user = User.query.get_or_404(user_id)
     new_role = request.form.get('role')
 
@@ -374,11 +574,13 @@ def update_user_role(user_id):
 
     return redirect(url_for('manage_users'))
 
+
 @app.route('/logout')
 @login_required
 def logout():
     logout_user()
     return redirect('/login')
+
 
 @app.route('/api/login', methods=['POST'])
 def api_login():
@@ -391,6 +593,7 @@ def api_login():
         login_user(user)
         return jsonify({'message': 'Login successful', 'role': user.role}), 200
     return jsonify({'error': 'Invalid credentials'}), 401
+
 
 @app.route('/api/devices', methods=['GET'])
 @login_required
@@ -407,6 +610,7 @@ def api_devices():
             'location': d.location
         } for d in devices
     ])
+
 
 @app.route('/api/assign_device', methods=['POST'])
 @login_required
@@ -430,6 +634,7 @@ def api_assign_device():
     db.session.commit()
     return jsonify({'message': 'Device assigned successfully'}), 200
 
+
 @app.route('/api/return_device', methods=['POST'])
 @login_required
 def api_return_device():
@@ -449,7 +654,9 @@ def api_return_device():
     db.session.commit()
     return jsonify({'message': 'Device returned successfully'}), 200
 
+
 if __name__ == '__main__':
     import os
+
     port = int(os.environ.get("PORT", 5000))
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=port, debug=True)
