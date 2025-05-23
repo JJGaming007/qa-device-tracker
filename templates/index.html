@@ -76,6 +76,25 @@
         }
     }
 
+    /* Checkbox styling */
+    .device-checkbox {
+        transform: scale(1.2);
+        margin-right: 8px;
+    }
+    
+    .select-all-container {
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .tally-info {
+        margin-left: 20px;
+        font-weight: 500;
+        color: #4a6cf7;
+    }
+
     /* ✅ Enhanced Dark Mode Styling */
     body.dark {
         background-color: #121212;
@@ -147,6 +166,9 @@
     }
     body.dark .toast.bg-danger {
         background-color: #dc3545 !important;
+    }
+    body.dark .tally-info {
+        color: #6c8fff;
     }
     
     /* Theme toggle switch styling */
@@ -241,9 +263,16 @@
     </div>
 
     {% if devices %}
+        <div class="select-all-container">
+            <input type="checkbox" id="selectAll" class="device-checkbox">
+            <label for="selectAll">Select All</label>
+            <span class="tally-info" id="tallyInfo">Selected: 0</span>
+        </div>
+        
         <table class="table table-hover">
             <thead class="table-light">
                 <tr>
+                    <th>Select</th>
                     <th>#</th>
                     <th>Device Name</th>
                     <th>Serial Number</th>
@@ -257,6 +286,9 @@
             <tbody>
                 {% for device in devices %}
                 <tr>
+                    <td>
+                        <input type="checkbox" class="device-checkbox device-select" data-sr-no="{{ device.sr_no }}">
+                    </td>
                     <td>{{ device.sr_no }}</td>
                     <td>{{ device.device_name }}</td>
                     <td>{{ device.serial_number }}</td>
@@ -331,6 +363,42 @@
     socket.on('device_updated', (data) => {
         console.log('Device updated:', data);
         location.reload();
+    });
+
+    // Checkbox functionality for tallying
+    document.addEventListener('DOMContentLoaded', function() {
+        const selectAllCheckbox = document.getElementById('selectAll');
+        const deviceCheckboxes = document.querySelectorAll('.device-select');
+        const tallyInfo = document.getElementById('tallyInfo');
+
+        // Update tally count
+        function updateTally() {
+            const checkedCount = document.querySelectorAll('.device-select:checked').length;
+            tallyInfo.textContent = `Selected: ${checkedCount}`;
+        }
+
+        // Select all functionality
+        selectAllCheckbox.addEventListener('change', function() {
+            deviceCheckboxes.forEach(checkbox => {
+                checkbox.checked = this.checked;
+            });
+            updateTally();
+        });
+
+        // Individual checkbox change
+        deviceCheckboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                // Update select all checkbox state
+                const checkedCount = document.querySelectorAll('.device-select:checked').length;
+                selectAllCheckbox.checked = checkedCount === deviceCheckboxes.length;
+                selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < deviceCheckboxes.length;
+                
+                updateTally();
+            });
+        });
+
+        // Initialize tally
+        updateTally();
     });
 </script>
 </body>
