@@ -167,18 +167,19 @@ def send_slack_async(message, thread_ts=None):
     if slack_client:
         executor.submit(send_slack_message, message, thread_ts)
 
-
 def emit_device_update(device):
     """Optimized device update emission"""
-    socketio.emit('device_updated', {
+    ist = pytz.timezone("Asia/Kolkata")
+    device_data = {
         'sr_no': device.sr_no,
         'device_name': device.device_name,
         'status': device.status,
         'assigned_to': device.assigned_to or '',
-        'updated_on': device.updated_on.isoformat() if device.updated_on else '',
+        'updated_on': device.updated_on.astimezone(ist).isoformat() if device.updated_on else '',
         'location': device.location or ''
-    }, namespace='/')
-
+    }
+    print(f"📡 Emitting device update: {device_data}")  # Debug log
+    socketio.emit('device_updated', device_data, namespace='/')
 
 @app.route('/bulk_operation', methods=['POST'])
 @login_required
@@ -205,9 +206,6 @@ def bulk_operation():
         slack_messages = []
 
         for device in devices:
-            original_status = device.status
-            original_assigned = device.assigned_to
-
             if operation == 'assign' and assigned_to:
                 if not device.assigned_to:
                     device.assigned_to = assigned_to
@@ -217,7 +215,10 @@ def bulk_operation():
 
                     # Prepare Slack message for async sending
                     slack_messages.append({
-                        'message': f"📱 *{device.device_name}* (S/N: {device.serial_number}) has been *assigned* to *{assigned_to}* by *{current_user.email}* at {now.strftime('%Y-%m-%d %H:%M:%S')} IST (Bulk Operation).",
+                        'message': f"📱 *Device:* {device.device_name}\n"
+                                   f"*Serial Number:* {device.serial_number}\n"
+                                   f"*Assigned to:* {assigned_to}\n"
+                                   f"*Assigned by:* {current_user.email}\n",
                         'device': device
                     })
 
@@ -239,6 +240,26 @@ def bulk_operation():
                             'message': f"🔄 *{device.device_name}* (S/N: {device.serial_number}) was returned and is now available (Bulk Operation)."
                         })
 
+            elif operation == 'toggle_allocate':
+                if device.assigned_to:
+                    if device.status == "Allocated":
+                        device.status = "In Use"
+                        operation_word = "unallocated"
+                        slack_msg = "🔓 Unallocated (Bulk Operation)"
+                    else:
+                        device.status = "Allocated"
+                        operation_word = "allocated"
+                        slack_msg = "🔒 Allocated - Permanent (Bulk Operation)"
+
+                    device.updated_on = now
+                    updated_devices.append(device)
+
+                    if device.slack_ts:
+                        slack_messages.append({
+                            'message': slack_msg,
+                            'thread_ts': device.slack_ts
+                        })
+
         # Commit all changes at once
         if updated_devices:
             db.session.commit()
@@ -251,11 +272,17 @@ def bulk_operation():
         for device in updated_devices:
             emit_device_update(device)
 
-        operation_word = "assigned" if operation == 'assign' else "returned"
-        return jsonify({
-            'success': True,
-            'message': f'{len(updated_devices)} devices {operation_word} successfully'
-        }), 200
+        if operation == 'toggle_allocate':
+            return jsonify({
+                'success': True,
+                'message': f'{len(updated_devices)} devices allocation status updated successfully'
+            }), 200
+        else:
+            operation_word = "assigned" if operation == 'assign' else "returned"
+            return jsonify({
+                'success': True,
+                'message': f'{len(updated_devices)} devices {operation_word} successfully'
+            }), 200
 
     except Exception as e:
         print("Error in bulk_operation:", e)
@@ -369,21 +396,27 @@ def assign_device():
             send_slack_async("Returned ✅", thread_ts=device.slack_ts)
         elif operation_type == "assigned":
             status_message = (
-                f"📱 *{device.device_name}* (S/N: {device.serial_number}) has been *assigned* to *{assigned_to}* "
-                f"by *{current_user.email}* at {now.strftime('%Y-%m-%d %H:%M:%S')} IST."
+                f"*Device:* {device.device_name}\n"
+                f"*Serial Number:* {device.serial_number}\n"
+                f"*Assigned to:* {assigned_to}\n"
+                f"*Assigned by:* {current_user.email}\n"
             )
 
             # Handle Slack timestamp update asynchronously
             def handle_slack():
                 try:
-                    future = send_slack_message(status_message)
-                    if future:
-                        ts = future.result(timeout=3)  # Short timeout
+                    response = send_slack_message(status_message)
+                    if response:
+                        ts = response.result(timeout=3)  # Wait for the result
                         if ts:
-                            device.slack_ts = ts
-                            db.session.commit()
-                except:
-                    pass  # Ignore Slack failures
+                            # Update the device with slack_ts in a new session
+                            with app.app_context():
+                                device_update = db.session.get(DeviceInventory, sr_no)
+                                if device_update:
+                                    device_update.slack_ts = ts
+                                    db.session.commit()
+                except Exception as e:
+                    print(f"Slack handling error: {e}")
 
             executor.submit(handle_slack)
 
@@ -417,6 +450,15 @@ def protected():
         flash('Contact your Admin', 'danger')
         return redirect(url_for('index'))
     return "You have accessed a protected admin route."
+
+@socketio.on('connect')
+def handle_connect():
+    print(f"Client connected: {request.sid}")
+    emit('connected', {'status': 'Connected to server'})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print(f"Client disconnected: {request.sid}")
 
 
 @app.route('/return_device', methods=['POST'])
@@ -455,6 +497,9 @@ def return_device():
             flash("Invalid device ID", "danger")
             return redirect(url_for("index", search=search_param))
 
+        # Store slack_ts before updating
+        stored_slack_ts = device.slack_ts
+
         # Update device first
         device.assigned_to = ""
         device.status = "Available"
@@ -468,8 +513,8 @@ def return_device():
         emit_device_update(device)
 
         # Send Slack messages asynchronously (non-blocking)
-        if device.slack_ts:
-            send_slack_async("Returned ✅", thread_ts=device.slack_ts)
+        if stored_slack_ts:
+            send_slack_async("Returned ✅", thread_ts=stored_slack_ts)
         else:
             send_slack_async(
                 f"🔄 *{device.device_name}* (S/N: {device.serial_number}) was returned and is now available.")
@@ -519,6 +564,63 @@ def register():
         return redirect(url_for('login'))
 
     return render_template('register.html')
+
+
+@app.route('/allocate_device', methods=['POST'])
+@login_required
+@role_required('admin')
+def allocate_device():
+    try:
+        data = request.get_json()
+        sr_no = data.get("sr_no")
+        allocate = data.get("allocate", True)
+        search_param = data.get("search", "")
+
+        if not sr_no:
+            return jsonify({'success': False, 'message': 'Missing device ID'}), 400
+
+        device = db.session.get(DeviceInventory, sr_no)
+        if not device:
+            return jsonify({'success': False, 'message': 'Device not found'}), 404
+
+        if not device.assigned_to:
+            return jsonify({'success': False, 'message': 'Cannot allocate unassigned device'}), 400
+
+        now = datetime.now(pytz.timezone("Asia/Kolkata"))
+
+        # Toggle allocation status
+        if allocate:
+            device.status = "Allocated"
+            operation_type = "allocated"
+        else:
+            device.status = "In Use"
+            operation_type = "unallocated"
+
+        device.updated_on = now
+        db.session.commit()
+
+        # Emit socket update
+        emit_device_update(device)
+
+        # Send Slack notification
+        if device.slack_ts:
+            status_message = f"{'🔒 Allocated (Permanent)' if allocate else '🔓 Unallocated'}"
+            send_slack_async(status_message, thread_ts=device.slack_ts)
+
+        return jsonify({
+            'success': True,
+            'message': f'Device {operation_type} successfully',
+            'device': {
+                'sr_no': device.sr_no,
+                'status': device.status,
+                'assigned_to': device.assigned_to
+            }
+        }), 200
+
+    except Exception as e:
+        print("Error in allocate_device:", e)
+        db.session.rollback()
+        return jsonify({'success': False, 'message': 'An unexpected error occurred'}), 500
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -599,6 +701,7 @@ def api_login():
 @login_required
 def api_devices():
     devices = DeviceInventory.query.all()
+    ist = pytz.timezone("Asia/Kolkata")
     return jsonify([
         {
             'sr_no': d.sr_no,
@@ -606,11 +709,10 @@ def api_devices():
             'serial_number': d.serial_number,
             'status': d.status,
             'assigned_to': d.assigned_to,
-            'updated_on': d.updated_on.isoformat() if d.updated_on else None,
+            'updated_on': d.updated_on.astimezone(ist).isoformat() if d.updated_on else None,  # Convert to IST
             'location': d.location
         } for d in devices
     ])
-
 
 @app.route('/api/assign_device', methods=['POST'])
 @login_required

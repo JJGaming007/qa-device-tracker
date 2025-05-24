@@ -130,6 +130,31 @@
         background-color: #ffc107;
         color: #212529;
     }
+
+    .bulk-allocate-btn {
+    background-color: #6f42c1;
+    color: white;
+    }
+
+    body.dark .bulk-allocate-btn {
+    background-color: #6f42c1;
+    color: white;
+    }
+
+    .badge {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.4rem;
+    border-radius: 0.25rem;
+    }
+
+    .bg-info {
+    background-color: #0dcaf0 !important;
+    }
+
+    body.dark .bg-info {
+    background-color: #0dcaf0 !important;
+    color: #000 !important;
+    }
     
     .bulk-operations button:hover {
         opacity: 0.9;
@@ -150,8 +175,8 @@
         width: 120px;
     }
 
-    .assign-form button {
-        padding: 4px 12px;
+.assign-form button {
+        padding: 4px 8px;
         font-size: 0.85rem;
     }
 
@@ -341,18 +366,66 @@
 
 <!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.4/socket.io.js"></script>
 <script>
 // Global variables
 let devices = [];
 let filteredDevices = [];
 let currentSearch = '';
+let selectedDevices = new Set(); // Track selected devices globally
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
     initializeTheme();
     loadDevices();
     setupSearchEvents();
+    setupSocketEvents(); // Add this for real-time updates
 });
+
+// Setup Socket.IO for real-time updates
+function setupSocketEvents() {
+    const socket = io({
+        transports: ['websocket', 'polling'],
+        timeout: 20000,
+        forceNew: true
+    });
+    
+    socket.on('connect', function() {
+        console.log('✅ Socket connected:', socket.id);
+    });
+    
+    socket.on('disconnect', function() {
+        console.log('❌ Socket disconnected');
+    });
+    
+    socket.on('connect_error', function(error) {
+        console.error('Socket connection error:', error);
+    });
+    
+    socket.on('device_updated', function(deviceData) {
+        console.log('📱 Device update received:', deviceData);
+        
+        // Find and update the device in our local data
+        const deviceIndex = devices.findIndex(d => d.sr_no === deviceData.sr_no);
+        if (deviceIndex !== -1) {
+            // Update the device data
+            devices[deviceIndex] = {
+                ...devices[deviceIndex],
+                status: deviceData.status,
+                assigned_to: deviceData.assigned_to,
+                updated_on: deviceData.updated_on,
+                location: deviceData.location
+            };
+            
+            // Re-filter and re-render
+            filterDevices(currentSearch);
+            renderDevices();
+            
+            // Show a toast notification
+            showToast(`Device ${deviceData.device_name} updated`, 'success');
+        }
+    });
+}
 
 // Theme management
 function initializeTheme() {
@@ -463,6 +536,8 @@ async function loadDevices() {
     }
 }
 
+
+
 // Render devices table
 function renderDevices() {
     const container = document.getElementById('devicesContainer');
@@ -486,6 +561,7 @@ function renderDevices() {
                 <input type="text" id="bulkAssignName" placeholder="Assign to..." style="display: none;">
                 <button type="button" id="bulkAssignBtn" class="bulk-assign-btn" disabled>Bulk Assign</button>
                 <button type="button" id="bulkReturnBtn" class="bulk-return-btn" disabled>Bulk Return</button>
+                <button type="button" id="bulkAllocateBtn" class="bulk-allocate-btn" disabled>Bulk Allocate</button>
             </div>
         </div>
         
@@ -500,7 +576,7 @@ function renderDevices() {
                     <th>Owner</th>
                     <th>Updated On</th>
                     <th>Assign</th>
-                    <th>Return</th>
+                    <th>Return/Allocate</th>
                 </tr>
             </thead>
             <tbody>
@@ -510,14 +586,27 @@ function renderDevices() {
                             <input type="checkbox" class="device-checkbox device-select" 
                                    data-sr-no="${device.sr_no}" 
                                    data-status="${device.status}" 
-                                   data-assigned="${device.assigned_to || ''}">
+                                   data-assigned="${device.assigned_to || ''}"
+                                   ${selectedDevices.has(device.sr_no.toString()) ? 'checked' : ''}>
                         </td>
                         <td>${device.sr_no}</td>
                         <td>${device.device_name}</td>
                         <td>${device.serial_number}</td>
-                        <td>${device.status}</td>
+                        <td>
+                            ${device.status}
+                            ${device.status === 'Allocated' ? '<span class="badge bg-info ms-1">PERMANENT</span>' : ''}
+                        </td>
                         <td>${device.assigned_to || 'Not assigned'}</td>
-                        <td>${device.updated_on ? new Date(device.updated_on).toLocaleString() : 'N/A'}</td>
+                        <td>${device.updated_on ? new Date(device.updated_on).toLocaleString('en-IN', {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit'
+                        }) : 'N/A'}</td>
+
+
                         <td>
                             ${!device.assigned_to ? `
                                 <div class="assign-form">
@@ -528,10 +617,16 @@ function renderDevices() {
                             ` : '—'}
                         </td>
                         <td>
-                            ${device.assigned_to ? `
+                            ${device.assigned_to && device.status !== 'Allocated' ? `
                                 <button type="button" class="btn btn-sm btn-warning" 
                                         onclick="returnDevice(${device.sr_no})">Return</button>
-                            ` : '—'}
+                            ` : ''}
+                            ${device.assigned_to ? `
+                                <button type="button" class="btn btn-sm ${device.status === 'Allocated' ? 'btn-secondary' : 'btn-info'}" 
+                                        onclick="toggleAllocateDevice(${device.sr_no})">
+                                    ${device.status === 'Allocated' ? 'Unallocate' : 'Allocate'}
+                                </button>
+                            ` : ''}
                         </td>
                     </tr>
                 `).join('')}
@@ -550,19 +645,38 @@ function setupCheckboxEvents() {
     const tallyInfo = document.getElementById('tallyInfo');
     const bulkAssignBtn = document.getElementById('bulkAssignBtn');
     const bulkReturnBtn = document.getElementById('bulkReturnBtn');
+    const bulkAllocateBtn = document.getElementById('bulkAllocateBtn');
     const bulkAssignName = document.getElementById('bulkAssignName');
 
     function updateTally() {
-        const checkedBoxes = document.querySelectorAll('.device-select:checked');
-        const checkedCount = checkedBoxes.length;
-        tallyInfo.textContent = `Selected: ${checkedCount}`;
+    const checkedBoxes = document.querySelectorAll('.device-select:checked');
+    const checkedCount = checkedBoxes.length;
+    tallyInfo.textContent = `Selected: ${checkedCount}`;
+    
+    // Update global selected devices set based on current checkboxes
+    // Don't clear the set, just sync it with current state
+    const currentlyChecked = new Set();
+    checkedBoxes.forEach(cb => currentlyChecked.add(cb.dataset.srNo));
+    
+    // Remove unchecked items from selectedDevices
+    const currentVisibleDevices = new Set();
+    document.querySelectorAll('.device-select').forEach(cb => {
+        currentVisibleDevices.add(cb.dataset.srNo);
+        if (cb.checked) {
+            selectedDevices.add(cb.dataset.srNo);
+        } else if (currentVisibleDevices.has(cb.dataset.srNo)) {
+            selectedDevices.delete(cb.dataset.srNo);
+        }
+    });
         
         if (checkedCount > 0) {
             const canAssign = Array.from(checkedBoxes).some(cb => !cb.dataset.assigned || cb.dataset.assigned === '');
             const canReturn = Array.from(checkedBoxes).some(cb => cb.dataset.assigned && cb.dataset.assigned !== '');
+            const canAllocate = Array.from(checkedBoxes).some(cb => cb.dataset.assigned && cb.dataset.assigned !== '');
             
             bulkAssignBtn.disabled = !canAssign;
             bulkReturnBtn.disabled = !canReturn;
+            bulkAllocateBtn.disabled = !canAllocate;
             
             if (canAssign) {
                 bulkAssignName.style.display = 'inline-block';
@@ -572,6 +686,7 @@ function setupCheckboxEvents() {
         } else {
             bulkAssignBtn.disabled = true;
             bulkReturnBtn.disabled = true;
+            bulkAllocateBtn.disabled = true;
             bulkAssignName.style.display = 'none';
         }
     }
@@ -597,8 +712,55 @@ function setupCheckboxEvents() {
     // Bulk operations
     bulkAssignBtn.addEventListener('click', performBulkAssign);
     bulkReturnBtn.addEventListener('click', performBulkReturn);
+    bulkAllocateBtn.addEventListener('click', performBulkAllocate);
     
     updateTally();
+}
+
+// New function for allocate/unallocate
+async function toggleAllocateDevice(srNo) {
+    const device = devices.find(d => d.sr_no === srNo);
+    const isCurrentlyAllocated = device.status === 'Allocated';
+    const action = isCurrentlyAllocated ? 'unallocate' : 'allocate';
+    
+    if (!confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} this device?`)) {
+        return;
+    }
+    
+    const row = document.getElementById(`device-row-${srNo}`);
+    row.classList.add('loading');
+    
+    try {
+        const response = await fetch('/allocate_device', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                sr_no: srNo,
+                allocate: !isCurrentlyAllocated,
+                search: currentSearch
+            })
+        });
+        
+        if (response.ok) {
+            showToast(`Device ${action}d successfully`, 'success');
+            row.classList.add('operation-success');
+            setTimeout(() => {
+                row.classList.remove('operation-success');
+                loadDevices(); // Refresh data
+            }, 1000);
+        } else {
+            throw new Error(`${action} failed`);
+        }
+    } catch (error) {
+        console.error(`Error ${action}ing device:`, error);
+        showToast(`Failed to ${action} device`, 'danger');
+        row.classList.add('operation-error');
+        setTimeout(() => row.classList.remove('operation-error'), 2000);
+    } finally {
+        row.classList.remove('loading');
+    }
 }
 
 // Device operations
@@ -772,6 +934,48 @@ async function performBulkReturn() {
     } catch (error) {
         console.error('Error in bulk return:', error);
         showToast('Failed to return devices', 'danger');
+    }
+}
+
+// New bulk allocate function
+async function performBulkAllocate() {
+    const selectedDevicesArray = Array.from(document.querySelectorAll('.device-select:checked'))
+        .filter(cb => cb.dataset.assigned && cb.dataset.assigned !== '')
+        .map(cb => cb.dataset.srNo);
+    
+    if (selectedDevicesArray.length === 0) {
+        showToast('No assigned devices selected for allocation', 'danger');
+        return;
+    }
+    
+    if (!confirm(`Toggle allocation status for ${selectedDevicesArray.length} devices?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/bulk_operation', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                operation: 'toggle_allocate',
+                device_ids: selectedDevicesArray,
+                search: currentSearch
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            loadDevices(); // Refresh data
+        } else {
+            throw new Error(result.message || 'Bulk allocation failed');
+        }
+    } catch (error) {
+        console.error('Error in bulk allocate:', error);
+        showToast('Failed to toggle allocation status', 'danger');
     }
 }
 
